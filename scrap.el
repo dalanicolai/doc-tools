@@ -292,7 +292,7 @@ columns"
   (let* ((visible (scrap-visible-pages))
          (displayed (scrap-displayed-images)))
     ;NOTE the condition might only be relevant when new window (not sure)
-    (unless (= (length visible) scrap-last-page)
+    (unless (= (print (length visible) #'external-debugging-output) scrap-last-page)
       (dolist (p (cl-set-difference displayed visible))
         (scrap-undisplay-page p))
       (let* ((pages (cl-set-difference visible displayed))
@@ -301,8 +301,9 @@ columns"
                                                      (when (scrap-image-p display-prop)
                                                        (= (car (image-size display-prop)) w))))
                                                  pages)))
+        (print non-exisiting-images #'external-debugging-output)
         (when non-exisiting-images
-          (scrap-display-page non-exisiting-images))))))
+          (scrap-display-pages non-exisiting-images))))))
 
 
 (defun scrap-visible-pages ()
@@ -332,7 +333,7 @@ columns"
     (overlay-put (scrap-overlay page)
                  'display `(space . (:width (,w) :height (,h))))))
 
-;; (defun scrap-display-page (pages &optional _)
+;; (defun scrap-display-pages (pages &optional _)
 ;;   (let ((page (car pages)))
 ;;     (pcase-let* ((`(,w . ,h) (nth (1- page) (scrap-page-sizes)))
 ;;                  (svg (svg-create w h)))
@@ -345,18 +346,18 @@ columns"
 ;;                    'display (svg-image svg :margin '(1 . 1) :ascent 80)))))
 ;; 'display (svg-image svg ))))
 
-(defun scrap-display-page (pages &optional force)
+(defun scrap-display-pages (pages &optional force)
   ;; (print "RUNNING" #'external-debugging-output)
   (pcase-let* ((`(,w . ,h) (nth (1- (car pages)) (scrap-page-sizes))))
-    (when non-exisiting-images
-      (dolist (page non-exisiting-images)
-        (let ((scale (/ (float w) (car (nth (1- page) scrap-aspect-ratios))))
-              (svg (svg-create w h))
-              (data (funcall scrap-image-data-function page w))
+    (let ((scale (/ (float w) (car (nth 0 scrap-aspect-ratios))))
+          (data (funcall scrap-image-data-function pages w)))
+      ;; (print (format "data %s" (substring (cadr data) 0 2) #'external-debugging-output))
+      (dolist (page pages)
+        (let ((svg (svg-create w h))
               (image nil))
           (unless w (print "NO W" #'external-debugging-output))
           (cond (scrap-djvu-svg-embed
-                 (svg-embed svg data "image/x-portable-bitmap" t)
+                 (svg-embed svg (car data) "image/x-portable-bitmap" t)
                  ;; (svg-embed svg data "image/tiff" t)
                  (when-let (rects (alist-get page papyrus-current-rectangles))
                    (mapcar (lambda (c)
@@ -374,16 +375,19 @@ columns"
                  (setq image (svg-image svg :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
                  (image-property image :type))
                 (t
-                 ;NOTE expects data
-                 (setq image (create-image data 'pbm t
+                                        ;NOTE expects data
+                 (setq image (create-image (car data) 'pbm t
                                            :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
-      ;; (when scrap-center
-      ;;   (overlay-put o 'before-string
-      ;;                (when (> (window-pixel-width) w)
-      ;;                  (propertize " " 'display
-      ;;                              `(space :align-to
-      ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
-          (overlay-put (scrap-overlay page) 'display image))))))
+          ;; (when scrap-center
+          ;;   (overlay-put o 'before-string
+          ;;                (when (> (window-pixel-width) w)
+          ;;                  (propertize " " 'display
+          ;;                              `(space :align-to
+          ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
+          (print (format "page %s" page) #'external-debugging-output)
+          (overlay-put (scrap-overlay page) 'display image))
+        (setq data (cdr data))))))
+
 (defun scrap-goto-page-start ()
   (interactive)
   (image-set-window-vscroll 0))
@@ -511,8 +515,8 @@ The number of COLUMNS can be set with a numeric prefix argument."
               (dotimes (i last-page)
                 (let* ((p (1+ i))
                        (svg (copy-sequence source-svg))
-                       (im (create-image (print (concat output-dir
-                                                  (format "thumb%d.tif" p)))
+                       (im (create-image (concat output-dir
+                                                       (format "thumb%d.tif" p))
                                          'tiff
                                          nil
                                          :margin '(2 . 1))))
