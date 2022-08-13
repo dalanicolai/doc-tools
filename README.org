@@ -1,0 +1,18 @@
+* Notes
+
+#+begin_src emacs-lisp
+  (cl-loop for f from 1 to 60
+           when (eq (% 120 f) 0)
+           collect f)
+#+end_src
+
+#+RESULTS:
+| 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 15 | 20 | 24 | 30 | 40 | 60 |
+
+* Multiple Windows
+A buffer's text format is unique, so (without using overlays), the
+formattings of a single buffer displayed in different windows are
+identical. However, overlays can be made made to 'show only in a
+single window' by setting the window as its window property.
+
+Now windows 
