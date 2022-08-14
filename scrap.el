@@ -112,8 +112,8 @@ TODO update docstring (no macro anymore)"
   "List of overlays that make up a scroll.
 Setf-able function."
   (declare (gv-setter (lambda (val)
-                        `(overlay-put (nth (1- page) (image-roll-overlays)) ,val))))
-  (overlay-get (nth (1- page) (image-roll-overlays)) prop))
+                        `(overlay-put (nth (1- page) (scrap-overlays)) ,val))))
+  (overlay-get (nth (1- page) (scrap-overlays)) prop))
 
 (defun scrap-image-p (object)
   (eq (car object) 'image))
@@ -163,7 +163,7 @@ Setf-able function."
   (let* ((pages scrap-last-page)
          (columns (or (scrap-columns) 1))
          (page-sizes (scrap-desired-page-sizes
-                          scrap-aspect-ratios
+                          scrap-internal-page-sizes
                           nil
                           columns
                           scrap-horizontal-margin
@@ -251,7 +251,7 @@ Setf-able function."
                    (floor (- (* (/ target-width (car s)) ;we correct the ratio t.i.c. the h-margins
                                 (if (proper-list-p s) (cadr s) (cdr s)))
                              (* 2 (or v-margin 0)))))))
-   (or aspect-ratios scrap-aspect-ratios)))
+   (or aspect-ratios scrap-internal-page-sizes)))
 
 (defun scrap-fit-toggle ()
   (interactive)
@@ -271,7 +271,7 @@ columns"
                          collect f)
                 ",")))
   (let ((scrap-page-sizes (scrap-desired-page-sizes
-                           scrap-aspect-ratios nil columns
+                           scrap-internal-page-sizes nil columns
                            scrap-horizontal-margin scrap-vertical-margin))
         (pos 1)
         (i 0))
@@ -294,7 +294,7 @@ columns"
   (let* ((visible (scrap-visible-pages))
          (displayed (scrap-displayed-images)))
     ;NOTE the condition might only be relevant when new window (not sure)
-    (unless (= (length visible) scrap-last-page)
+    ;; (unless (= (length visible) scrap-last-page)
       (dolist (p (cl-set-difference displayed visible))
         (scrap-undisplay-page p))
       (let* ((pages (cl-set-difference visible displayed))
@@ -304,29 +304,30 @@ columns"
                                                        (= (car (image-size display-prop)) w))))
                                                  pages)))
         (when non-exisiting-images
-          (scrap-display-page non-exisiting-images))))))
+          ;; (scrap-display-page non-exisiting-images))))))
+          (scrap-display-page '(1 2))))))
 
 
 (defun scrap-visible-pages ()
   (interactive)
   (sit-for 0.001) ;when overlays are not yet 'filled', and there sizes are still
-                  ;small, then overlays-in returns too many overlays
-  (djvu-return (mapcar (lambda (o)
-                         (overlay-get o 'page))
-                       (scrap-overlay-selected-window-filter
-                        (overlays-in (min (- (window-start) scrap-line-length) 1)
-                                     (+ (window-end) scrap-line-length))))))
+                                        ;small, then overlays-in returns too many overlays
+  (mapcar (lambda (o)
+            (overlay-get o 'page))
+          (scrap-overlay-selected-window-filter
+           (overlays-in (min (- (window-start) scrap-line-length) 1)
+                        (+ (window-end) scrap-line-length)))))
 
 (defun scrap-displayed-images ()
   (interactive)
   (let ((im-overlays (seq-filter (lambda (ov)
                                    (eq (car (overlay-get ov 'display))
                                        'image))
-                                  (scrap-overlay-selected-window-filter
-                                   (overlays-in (point-min) (point-max))))))
-    (djvu-return (mapcar (lambda (o)
-                           (overlay-get o 'page))
-                         im-overlays))))
+                                 (scrap-overlay-selected-window-filter
+                                  (overlays-in (point-min) (point-max))))))
+    (mapcar (lambda (o)
+              (overlay-get o 'page))
+            im-overlays)))
 
 (defun scrap-undisplay-page (page)
   ;; (print "of hier")
@@ -347,45 +348,122 @@ columns"
 ;;                    'display (svg-image svg :margin '(1 . 1) :ascent 80)))))
 ;; 'display (svg-image svg ))))
 
+(defvar process nil)
+
+;; TODO implement asynchronous display
+;; (proc (start-process "ddjvu" "imdata" "ddjvu"
+;;                      (format "-size=%dx%d" w 5000)
+;;                      "-format=pnm"
+;;                      (format "-pages=%d" (car pages))
 (defun scrap-display-page (pages &optional force)
   ;; (print "RUNNING" #'external-debugging-output)
-  (pcase-let* ((`(,w . ,h) (nth (1- (car pages)) (scrap-page-sizes))))
-    (when non-exisiting-images
-      (dolist (page non-exisiting-images)
-        (let ((scale (/ (float w) (car (nth (1- page) scrap-aspect-ratios))))
-              (svg (svg-create w h))
-              (data (funcall scrap-image-data-function page w))
-              (image nil))
-          (unless w (print "NO W" #'external-debugging-output))
-          (cond (scrap-djvu-svg-embed
-                 (svg-embed svg data "image/x-portable-bitmap" t)
-                 ;; (svg-embed svg data "image/tiff" t)
-                 (when-let (rects (alist-get page papyrus-current-rectangles))
-                   (mapcar (lambda (c)
-                             (apply #'svg-rectangle
-                                    svg
-                                    (append (mapcar (lambda (m)
-                                                      (round (* scale m)))
-                                                    (papyrus-coords-to-svg
-                                                     (cdr (nth (1- page) scrap-aspect-ratios))
-                                                     (seq-subseq c 0 4)))
-                                            (seq-subseq c 4))))
-                           rects)
-                   )
-                 ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
-                 (setq image (svg-image svg :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
-                 (image-property image :type))
-                (t
-                 ;NOTE expects data
-                 (setq image (create-image data 'pbm t
-                                           :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
-      ;; (when scrap-center
-      ;;   (overlay-put o 'before-string
-      ;;                (when (> (window-pixel-width) w)
-      ;;                  (propertize " " 'display
-      ;;                              `(space :align-to
-      ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
-          (overlay-put (scrap-overlay page) 'display image))))))
+  (pcase-let* ((win (selected-window))
+               (`(,w . ,h) (nth (1- (car pages)) (scrap-page-sizes)))
+               ;; (scale (/ (float w) (car (nth (1- (car pages)) scrap-internal-page-sizes))))
+               ;; (svg (svg-create w h))
+               ;; (data nil)
+               (image nil))
+    (unless process
+      (setq process (start-process "ddjvu" "imdata" "ddjvu"
+                                   (format "-size=%dx%d" w 5000)
+                                   "-format=tiff"
+                                   (format "-pages=%d" (car pages))
+                                   (buffer-file-name)
+                                   "/tmp/scrap-thumb"))
+      (set-process-sentinel process
+
+                            (lambda (p e)
+                            ;;   (unless w (print "NO W" #'external-debugging-output))
+                            ;;   (with-current-buffer "imdata"
+                            ;;     (set-buffer-multibyte nil)
+                            ;;     (let* ((coding-system-for-read 'raw-text))
+                            ;;       ;; (goto-char (point-max))
+                            ;;       (setq data (buffer-string))
+                            ;;       (setq test data))
+                            ;;     (kill-buffer))
+
+                              ;; (cond (scrap-djvu-svg-embed
+                              ;;        ;; (svg-embed svg data "image/x-portable-bitmap" t)
+                              ;;        (svg-embed svg data "image/tiff" t)
+                              ;;        (when-let (rects (alist-get page papyrus-current-rectangles))
+                              ;;          (mapcar (lambda (c)
+                              ;;                    (apply #'svg-rectangle
+                              ;;                           svg
+                              ;;                           (append (mapcar (lambda (m)
+                              ;;                                             (round (* scale m)))
+                              ;;                                           (papyrus-coords-to-svg
+                              ;;                                            (cdr (nth (1- page) scrap-internal-page-sizes))
+                              ;;                                            (seq-subseq c 0 4)))
+                              ;;                                   (seq-subseq c 4))))
+                              ;;                  rects)
+                              ;;          )
+                              ;;        ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
+                              ;;        (setq image (svg-image svg :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
+                              ;;        (image-property image :type))
+                              ;;       (t
+                              ;; NOTE expects data
+                              ;; (setq image (create-image data 'tiff t
+                              ;;                           :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
+                            (setq image (create-image (with-temp-buffer
+                                                        (set-buffer-multibyte nil)
+                                                        (insert-file-contents-literally "/tmp/scrap-thumb")
+                                                        (buffer-string))
+                                                      'tiff t))
+                                  ;; (create-image data 'pbm t
+                                  ;;                       :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
+                              ;; (when scrap-center
+                              ;;   (overlay-put o 'before-string
+                              ;;                (when (> (window-pixel-width) w)
+                              ;;                  (propertize " " 'display
+                              ;;                              `(space :align-to
+                              ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
+                              (overlay-put (scrap-overlay (car pages) win) 'display image)
+                              (setq process nil)
+                              (setq pages (cdr pages))
+                              (when pages 
+                                (scrap-display-page pages)))))))
+;; (defun scrap-display-page (pages &optional force)
+;;   ;; (print "RUNNING" #'external-debugging-output)
+;;   (pcase-let* ((`(,w . ,h) (nth (1- (car pages)) (scrap-page-sizes))))
+;;     (dolist (page pages)
+;;       (let ((scale (/ (float w) (car (nth (1- page) scrap-internal-page-sizes))))
+;;             (svg (svg-create w h))
+;;             ;; (data (funcall scrap-image-data-function page w))
+;;             (data test)
+;;             (image nil))
+;;         (unless w (print "NO W" #'external-debugging-output))
+;;         (cond (scrap-djvu-svg-embed
+;;                ;; (svg-embed svg data "image/x-portable-bitmap" t)
+;;                (svg-embed svg data "image/tiff" t)
+;;                (when-let (rects (alist-get page papyrus-current-rectangles))
+;;                  (mapcar (lambda (c)
+;;                            (apply #'svg-rectangle
+;;                                   svg
+;;                                   (append (mapcar (lambda (m)
+;;                                                     (round (* scale m)))
+;;                                                   (papyrus-coords-to-svg
+;;                                                    (cdr (nth (1- page) scrap-internal-page-sizes))
+;;                                                    (seq-subseq c 0 4)))
+;;                                           (seq-subseq c 4))))
+;;                          rects)
+;;                  )
+;;                ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
+;;                (setq image (svg-image svg :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))
+;;                (image-property image :type))
+;;               (t
+;;                ;; NOTE expects data
+;;                (setq image (create-image data 'tiff t
+;;                                          :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
+;;                ;; (setq image (create-image data 'pbm t
+;;                ;;                           :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
+;;         ;; (when scrap-center
+;;         ;;   (overlay-put o 'before-string
+;;         ;;                (when (> (window-pixel-width) w)
+;;         ;;                  (propertize " " 'display
+;;         ;;                              `(space :align-to
+;;         ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
+;;         (overlay-put (scrap-overlay page) 'display image)))))
+
 (defun scrap-goto-page-start ()
   (interactive)
   (image-set-window-vscroll 0))
