@@ -355,16 +355,15 @@ columns"
 (defun scrap-display-page (pages &optional force)
   ;; (print "RUNNING" #'external-debugging-output)
   (pcase-let* ((`(,w . ,h) (nth (1- (car pages)) (scrap-page-sizes))))
-    (when non-exisiting-images
-      (dolist (page non-exisiting-images)
+      (dolist (page pages)
         (let ((scale (/ (float w) (car (nth (1- page) scrap-aspect-ratios))))
               (svg (svg-create w h))
               (data (funcall scrap-image-data-function page w))
               (image nil))
           (unless w (print "NO W" #'external-debugging-output))
           (cond (scrap-djvu-svg-embed
-                 (svg-embed svg data "image/x-portable-bitmap" t)
-                 ;; (svg-embed svg data "image/tiff" t)
+                 ;; (svg-embed svg data "image/x-portable-bitmap" t)
+                 (svg-embed svg data "image/tiff" t)
                  (when-let (rects (alist-get page papyrus-current-rectangles))
                    (mapcar (lambda (c)
                              (apply #'svg-rectangle
@@ -382,15 +381,18 @@ columns"
                  (image-property image :type))
                 (t
                  ;NOTE expects data
-                 (setq image (create-image data 'pbm t
+                 (setq image (create-image data 'tiff t
                                            :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
+                 ;; (setq image (create-image data 'pbm t
+                 ;;                           :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)))))
       ;; (when scrap-center
       ;;   (overlay-put o 'before-string
       ;;                (when (> (window-pixel-width) w)
       ;;                  (propertize " " 'display
       ;;                              `(space :align-to
       ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
-          (overlay-put (scrap-overlay page) 'display image))))))
+          (overlay-put (scrap-overlay page) 'display image)))))
+
 (defun scrap-goto-page-start ()
   (interactive)
   (image-set-window-vscroll 0))
