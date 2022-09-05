@@ -1,5 +1,10 @@
 ;; -*- lexical-binding: t; -*-
 
+;;; Comments
+
+;; TODO maybe clean up some overlays at some point like in
+;; `pdf-view-new-window-function'
+
 (require 'image-mode)
 (require 'svg)
 (require 'cl-lib)
@@ -9,7 +14,12 @@
          'g
          `(,(svg--arguments nil args))))
 
-(defcustom scrap-djvu-svg-embed t
+(defcustom scrap-svg-image-width 944
+  "The width of the cached images."
+  :type 'numberp
+  :group 'scrap)
+
+(defcustom scrap-svg-embed t
   "Embed the images in svg."
   :type 'boolean
   :group 'scrap)
@@ -49,6 +59,13 @@ Little slower on page jumps."
 The buffer can display only a number of columns that is equal to
 a factor of this number."
   :type 'integer)
+
+(defcustom scrap-after-change-page-hook nil
+  "Hook run after changing to and displaying another page.
+
+See also `scrap-change-page-hook' and
+`scrap-before-change-page-hook'."
+  :type 'hook)
 
 (defcustom scrap-thumbs-width 175
   "Width of thumbnails in pixels.
@@ -94,51 +111,66 @@ should just be a list of the document its intrinsic page sizes.")
 (defvar-local scrap-image-data-function nil)
 (defvar-local scrap-thumbs-columns nil)
 (defvar-local scrap-fit-height nil)
+(defvar-local scrap-imenu-index nil)
+
+(defvar-local scrap-info-function nil)
 
 
 ;;; window local value utils
-(defun scrap-window-width (&optional window)
+(defun scrap-window-width (&optional winprops)
   "Number of columns.
 Setf-able function."
   (declare (gv-setter (lambda (val)
-                        `(image-mode-window-put 'width ,val ,window))))
-  (image-mode-window-get 'width window))
+                        `(image-mode-window-put 'width ,val ,winprops))))
+  (image-mode-window-get 'width winprops))
 
-(defun scrap-columns (&optional window)
+(defun scrap-columns (&optional winprops)
   "Number of columns.
 Setf-able function."
   (declare (gv-setter (lambda (val)
-                        `(image-mode-window-put 'columns ,val ,window))))
-  (image-mode-window-get 'columns window))
+                        `(image-mode-window-put 'columns ,val ,winprops))))
+  (image-mode-window-get 'columns winprops))
 
-(defun scrap-overlays (&optional window)
+(defun scrap-overlays (&optional winprops)
   "List of overlays that make up a scroll.
 Setf-able function."
   (declare (gv-setter (lambda (val)
-                        `(image-mode-window-put 'overlays ,val ,window))))
-  (image-mode-window-get 'overlays window))
+                        `(image-mode-window-put 'overlays ,val ,winprops))))
+  (image-mode-window-get 'overlays winprops))
 
-(defun scrap-overlay (&optional page window)
+(defun scrap-overlay (&optional page winprops)
   "Return the overlay that hold page number PAGE.
 Implemented as macro to make it setf'able.
 TODO update docstring (no macro anymore)"
   (nth (1- (or page (scrap-current-page)))
-        (scrap-overlays window)))
+       (scrap-overlays winprops)))
 
 (defun scrap-overlay-get (page prop)
   "List of overlays that make up a scroll."
   (overlay-get (nth (1- page) (scrap-overlays)) prop))
 
-(defun scrap-page-size (page)
+
+(defun scrap-swiper-matches (page &optional winprops)
   "List of overlays that make up a scroll.
 Setf-able function."
   (declare (gv-setter (lambda (val)
-                        `(overlay-put (nth (1- page) (scrap-overlays)) 'size ,val))))
-  (overlay-get (nth (1- page) (scrap-overlays)) 'size))
+                        `(overlay-put (nth (1- ,page) (scrap-overlays ,winprops)) 'swiper-matches ,val))))
+  (overlay-get (nth (1- page) (scrap-overlays winprops)) 'swiper-matches))
 
+;;; utils
+(defun scrap-info (&optional arg)
+  (interactive "P")
+  (call-interactively scrap-info-function arg))
 
 (defun scrap-image-p (object)
   (eq (car object) 'image))
+
+(defsubst scrap-page-size (page)
+  "List of overlays that make up a scroll."
+  (overlay-get (nth (1- page) (scrap-overlays)) 'size))
+
+(defsubst scrap-internal-size (page)
+  (nth (1- page) scrap-internal-page-sizes))
 
 (defsubst scrap-overlay-selected-window-filter (overlays)
   (cl-remove-if-not
@@ -201,26 +233,27 @@ Setf-able function."
 
 (when (featurep 'evil)
   (evil-define-key 'motion scrap-mode-map
-        "j" 'scrap-scroll-forward
-        "k" 'scrap-scroll-backward
-        ;; (kbd "<down>") 'scrap-scroll-forward
-        ;; (kbd "<up>") 'scrap-scroll-backward
-        (kbd "<wheel-down>") 'scrap-scroll-forward
-        (kbd "<wheel-up>") 'scrap-scroll-backward
-        ;; (kbd "<mouse-5>") 'scrap-scroll-forward
-        ;; (kbd "<mouse-4>") 'scrap-scroll-backward
-        "J" 'scrap-next-page
-        "K" 'scrap-previous-page
-        (kbd "<next>") 'scrap-next-page
-        (kbd "<prior>") 'scrap-previous-page
-        (kbd "C-j") 'scrap-scroll-screen-forward
-        (kbd "C-k") 'scrap-scroll-screen-backward
-        (kbd "S-<next>") 'scrap-scroll-screen-forward
-        (kbd "S-<prior>") 'scrap-scroll-screen-backward
-        "G" 'scrap-goto-page
-        "f" 'scrap-fit-toggle
-        "c" 'scrap-set-columns
-        "t" 'scrap-thumbs))
+    "j" 'scrap-scroll-forward
+    "k" 'scrap-scroll-backward
+    ;; (kbd "<down>") 'scrap-scroll-forward
+    ;; (kbd "<up>") 'scrap-scroll-backward
+    (kbd "<wheel-down>") 'scrap-scroll-forward
+    (kbd "<wheel-up>") 'scrap-scroll-backward
+    ;; (kbd "<mouse-5>") 'scrap-scroll-forward
+    ;; (kbd "<mouse-4>") 'scrap-scroll-backward
+    "J" 'scrap-next-page
+    "K" 'scrap-previous-page
+    (kbd "<next>") 'scrap-next-page
+    (kbd "<prior>") 'scrap-previous-page
+    (kbd "C-j") 'scrap-scroll-screen-forward
+    (kbd "C-k") 'scrap-scroll-screen-backward
+    (kbd "S-<next>") 'scrap-scroll-screen-forward
+    (kbd "S-<prior>") 'scrap-scroll-screen-backward
+    "G" 'scrap-goto-page
+    "f" 'scrap-fit-toggle
+    "c" 'scrap-set-columns
+    "t" 'scrap-thumbs
+    "n" 'scrap-search-next))
 
 (define-minor-mode scrap-minor-mode
   "Scrap"
@@ -242,61 +275,65 @@ Setf-able function."
     (if (fboundp m)
         (funcall m 0))))
 
-(defun scrap-redisplay ()
+(defun scrap-redisplay (&optional force)
   ;; if new window then, (scrap-columns) calls `image-mode-winprops' which runs
   ;; the `image-mode-new-window-functions' and sets up (a) new winprops(-alist)
   (scrap-debug "REDISPLAY")
 
-  ;; (unless (and (scrap-window-width)
-  ;;              (= (scrap-window-width) (window-pixel-width)))
-  (setf (scrap-window-width) (window-pixel-width))
+  (when (or (not (and (scrap-window-width)
+                      (= (scrap-window-width) (window-pixel-width))))
+            force)
+    (setf (scrap-window-width) (window-pixel-width))
 
-  (let* ((columns (or (scrap-columns) 1))
-         (page-sizes (scrap-desired-page-sizes
-                      scrap-internal-page-sizes
-                      nil
-                      columns
-                      scrap-horizontal-margin
-                      scrap-vertical-margin))
-         ;; (make-list pages (if (functionp scrap-demo-page-size)
-         ;;                      (funcall scrap-demo-page-size)
-         ;;                    scrap-demo-page-size))))
-         (n 0))
+    (let* ((columns (or (scrap-columns) 1))
+           (page-sizes (scrap-desired-page-sizes
+                        scrap-internal-page-sizes
+                        nil
+                        columns
+                        scrap-horizontal-margin
+                        scrap-vertical-margin))
+           ;; (make-list pages (if (functionp scrap-demo-page-size)
+           ;;                      (funcall scrap-demo-page-size)
+           ;;                    scrap-demo-page-size))))
+           (n 0))
 
-    (dolist (page-size page-sizes)
-      (let* ((page-width (+ (car page-size) (* 2 scrap-horizontal-margin)))
-             (overlay-heigth (+ (cdr page-size) (* 2 scrap-vertical-margin)))
-             (o (nth n (scrap-overlays))))
-        ;; (when scrap-center
-        ;;   (overlay-put o 'before-string
-        ;;                (when (> (window-pixel-width) page-width)
-        ;;                  (propertize " " 'display
-        ;;                              `(space :align-to
-        ;;                                      (,(floor (/ (- (window-pixel-width) page-width) 2))))))))
+      (dolist (page-size page-sizes)
+        (let* ((page-width (+ (car page-size) (* 2 scrap-horizontal-margin)))
+               (overlay-heigth (+ (cdr page-size) (* 2 scrap-vertical-margin)))
+               (o (nth n (scrap-overlays))))
+          ;; (when scrap-center
+          ;;   (overlay-put o 'before-string
+          ;;                (when (> (window-pixel-width) page-width)
+          ;;                  (propertize " " 'display
+          ;;                              `(space :align-to
+          ;;                                      (,(floor (/ (- (window-pixel-width) page-width) 2))))))))
 
-        ;; NOTE we would like to store data in the overlay, but the following
-        ;; functions seems not to remove that data in time
-        ;; (overlay-put o 'data nil) 
+          ;; NOTE we would like to store data in the overlay, but the following
+          ;; functions seems not to remove that data in time
+          ;; (overlay-put o 'data nil)
 
-        (overlay-put o 'display `(space . (:width (,page-width) :height (,overlay-heigth))))
-        ;; (overlay-put o 'face `(:background ,scrap-overlay-face-bg-color))
-        (overlay-put o 'face `(:background ,scrap-overlay-face-bg-color))
-        (overlay-put o 'size page-size)
-        (setq n (1+ n))))
-    ;; (redisplay t) ;NOTE does not help for display issue
-    (setf (scrap-columns) columns))
-  ;; (sit-for 0.01) ;NOTE does not help for display issue
-  (scrap-update t))
+          (overlay-put o 'display `(space . (:width (,page-width) :height (,overlay-heigth))))
+          ;; (overlay-put o 'face `(:background ,scrap-overlay-face-bg-color))
+          (overlay-put o 'face `(:background ,scrap-overlay-face-bg-color))
+          (overlay-put o 'size page-size)
+          (setq n (1+ n))))
+      ;; (redisplay t) ;NOTE does not help for display issue
+      (setf (scrap-columns) columns))
+    ;; (sit-for 0.01) ;NOTE does not help for display issue
+    (scrap-update)))
+    ;; (run-with-timer 0.01 nil #'scrap-update)))
 
-;; NOTE runs twice on first window creation, once for winprops of 'selected
+;; NOTE this function is called via `scrap-columns' in `scrap-redisplay'. The
+;; function runs twice on first window creation, once for winprops of 'selected
 ;; window', and once more for winprops of t holding a collection of winprops of
 ;; all windows when the first winprops are added (i.e. triggered by the call to
 ;; `image-mode-window-put')
 (defun scrap-new-window-function (winprops)
+  (scrap-debug "NEW_WINDOW")
   (if (not (overlays-at 1))
       (let (overlays
             (pages scrap-last-page)
-            (win (print (car winprops) #'external-debugging-output))
+            (win (car winprops))
             (inhibit-read-only t))
 
         (erase-buffer)
@@ -313,30 +350,44 @@ Setf-able function."
             (overlay-put o 'window win)
             (push o overlays)))
         (delete-char -1)
-        (image-mode-window-put 'overlays (nreverse overlays) winprops)
-        (set-buffer-modified-p nil))
 
-;;       ;; required to make `pdf-view-redisplay-some-windows' call `pdf-view-redisplay'
-;;       (when-let (fun scrap-set-redisplay-flag-function)
-    ;;         (funcall fun)))
+        ;; this function also calls `scrap-new-window-function'
+        (image-mode-window-put 'overlays (nreverse overlays) winprops)
+        (set-buffer-modified-p nil)
+
+        ;; need to place point at some overlay, before continuing 'filling the
+        ;; overlays' in the `scrap-redisplay' function
+        ;; NOTE, when implementing some 'restore' functionality, then jump to
+        ;; the correct 'point' here (the overlays, i.e. `scrap-page-pos', are
+        ;; not yet available).
+        (goto-char (point-min)))
+
+    ;; ;; required to make `pdf-view-redisplay-some-windows' call `pdf-view-redisplay'
+    ;; (when-let (fun scrap-set-redisplay-flag-function)
+    ;;   (funcall fun)))
     (let ((ols (mapcar (lambda (o)
                          (let ((oc (copy-overlay o)))
                            (overlay-put oc 'window (car winprops))
                            oc))
-                       (scrap-overlays))))
+                       (scrap-overlays)))
+          (pos (image-mode-window-get 'page)))
       (image-mode-window-put 'overlays ols winprops)
 
 
       ;; cursor should be on overlay for `scrap-current-page'
       ;; (setf (scrap-current-page (car winprops))
-      ;;       (or (scrap-current-page (car winprops)) 1)))
+      ;;       (or (scrap-current-page (car winprops)) 1))))))
       (goto-char (point-min)))))
+
+(defun test (page)
+  (goto-char (scrap-page-pos page))
+  (scrap-debug "HIER %s" (image-mode-window-get 'overlays)))
 
 (defun scrap-desired-page-sizes (&optional aspect-ratios fit-height columns h-margin v-margin)
   (mapcar
    (lambda (s)
      (let* ((win-width (float (window-text-width nil t)))
-            (column-width (/ win-width (or columns 1)))
+            (column-width (min (/ win-width (or columns 1)) scrap-svg-image-width))
             (v-scale-factor (when (or fit-height scrap-fit-height)
                               (/ (float (window-text-height nil t)) (cdr s))))
             (use-vertical-scaling (when v-scale-factor
@@ -347,15 +398,15 @@ Setf-able function."
             (target-width (- (* scaling-factor (car s))
                              (if use-vertical-scaling 0 (* 2 (or h-margin 0))))))
        (cons (floor target-width)
-                   (floor (- (* (/ target-width (car s)) ;we correct the ratio t.i.c. the h-margins
-                                (if (proper-list-p s) (cadr s) (cdr s)))
-                             (* 2 (or v-margin 0)))))))
+             (floor (- (* (/ target-width (car s)) ;we correct the ratio t.i.c. the h-margins
+                          (if (proper-list-p s) (cadr s) (cdr s)))
+                       (* 2 (or v-margin 0)))))))
    (or aspect-ratios scrap-internal-page-sizes)))
 
 (defun scrap-fit-toggle ()
   (interactive)
   (setq scrap-fit-height (not scrap-fit-height))
-  (scrap-redisplay))
+  (scrap-redisplay t))
 
 
 (defun scrap-set-columns (columns)
@@ -369,7 +420,8 @@ columns"
                          when (eq (% scrap-line-length f) 0)
                          collect f)
                 ",")))
-  (let ((scrap-page-sizes (scrap-desired-page-sizes
+  (let ((current-page (scrap-current-page))
+        (scrap-page-sizes (scrap-desired-page-sizes
                            scrap-internal-page-sizes nil columns
                            scrap-horizontal-margin scrap-vertical-margin))
         (pos 1)
@@ -378,43 +430,46 @@ columns"
       (let ((s (nth i scrap-page-sizes)))
         (move-overlay o pos (setq pos (+ pos (/ scrap-line-length columns))))
         (overlay-put o 'size s)
+        (overlay-put o 'before-string nil)
         (overlay-put o 'display `(space . (:width (,(car s)) :height (,(cdr s))))))
       (when (eq (% i columns) (1- columns))
         (setq pos (1+ pos)))
-      (setq i (1+ i))))
-  (setf (scrap-columns) columns)
-  (scrap-update))
+      (setq i (1+ i)))
+    (setf (scrap-columns) columns)
+    (scrap-goto-page current-page)))
 
 ;; for some reason, despite the overlays already having their size,
 ;; `overlays-in' over the visible region returns lists all overlays in the
 ;; buffer when a new window is created (and possibly at other times also). So we
 ;; test for the condition and at a new-window flag/argument to 'circumvent' the
 ;; condition. TODO we should then pass the correct page to be displayed.
-(defun scrap-update (&optional new-window)
+(defun scrap-update ()
   (interactive)
-  (let* ((visible (print (scrap-visible-pages) #'external-debugging-output))
-         (displayed (scrap-displayed-images)))
+  (let* ((visible (scrap-debug "%s" (scrap-visible-pages)))
+         (displayed (scrap-displayed-images))
                                         ;NOTE the condition might only be relevant when new window (not sure)
-    (cond ((= (length visible) scrap-last-page)
+         (n-visible (length visible)))
+    (cond ((or (= n-visible scrap-last-page)
+               (= n-visible 0))
            (scrap-debug "number of visible overlays %s (all)" (length visible))
            (scrap-display-pages '(1 2)))
           (t
            (dolist (p (cl-set-difference displayed visible))
              (scrap-undisplay-page p))
-           (let* ((pages (print (cl-set-difference visible displayed) #'external-debugging-output))
+           (let* ((pages (cl-set-difference visible displayed))
                   (non-exisiting-images (cl-remove-if (lambda (p)
                                                         (let* ((display-prop (scrap-overlay-get p 'display)))
                                                           (when (scrap-image-p display-prop)
                                                             (= (car (image-size display-prop)) w))))
                                                       pages)))
-             (when non-exisiting-images
-               (scrap-display-pages non-exisiting-images #'external-debugging-output)))))))
+             (when (scrap-debug "%s" non-exisiting-images)
+               (scrap-display-pages non-exisiting-images)))))))
 
 
 (defun scrap-visible-pages ()
   (interactive)
   (sit-for 0.001) ;when overlays are not yet 'filled', and their sizes are still
-                  ;small, then overlays-in returns too many overlays
+                                        ;small, then overlays-in returns too many overlays
   (mapcar (lambda (o)
             (overlay-get o 'page))
           (delq nil (scrap-overlay-selected-window-filter
@@ -426,8 +481,8 @@ columns"
   (let ((im-overlays (seq-filter (lambda (ov)
                                    (eq (car (overlay-get ov 'display))
                                        'image))
-                                  (scrap-overlay-selected-window-filter
-                                   (overlays-in (point-min) (point-max))))))
+                                 (scrap-overlay-selected-window-filter
+                                  (overlays-in (point-min) (point-max))))))
     (mapcar (lambda (o)
               (overlay-get o 'page))
             im-overlays)))
@@ -435,24 +490,120 @@ columns"
 (defun scrap-undisplay-page (page)
   ;; (print "of hier")
   (pcase-let* ((`(,w . ,h) (scrap-page-size page)))
+    (overlay-put (scrap-overlay page) 'data nil) ;; TODO improve/implement
+    ;; caching algorithm
     (overlay-put (scrap-overlay page)
                  'display `(space . (:width (,w) :height (,h))))))
+
+(defvar scrap-process nil)
+
+;; NOTE pdf-tools style async (se next for more logical async version)
+;; (defun scrap-display-pages-async (pages &optional force)
+;;   ;; (print "RUNNING" #'external-debugging-output)
+;;   (pcase-let* ((size (scrap-page-size (car pages)))
+;;                (`(,w . ,h) size)
+;;                ;; (scale (/ (float w) (car (nth (1- (car pages)) scrap-internal-page-sizes))))
+;;                ;; (svg (svg-create w h))
+;;                ;; (data nil))
+;;                )
+;;     (unless scrap-process
+;;       (setq scrap-process
+;;             ;; (start-process "ddjvu" "imdata" "ddjvu"
+;;             ;;                        (format "-size=%dx%d" w 5000)
+;;             ;;                        "-format=tiff"
+;;             ;;                        "-quality=50"
+;;             ;;                        (format "-pages=%d" (car pages))
+;;             ;;                        (buffer-file-name)
+;;             ;;                        "/tmp/scrap-image")
+;;             (start-process "mutool draw" "imdata" "mutool"
+;;                            "draw"
+;;                            "-o" "/tmp/scrap-image"
+;;                            "-F" "png"
+;;                            "-w" (number-to-string w)
+;;                            (buffer-file-name)
+;;                            (number-to-string (car pages)))
+;;             )
+;;       (set-process-sentinel scrap-process
+
+;;                             (lambda (p e)
+;;                               (scrap-display-page (car pages)
+;;                                                   (with-temp-buffer
+;;                                                     (set-buffer-multibyte nil)
+;;                                                     (insert-file-contents-literally "/tmp/scrap-image")
+;;                                                     (buffer-string))
+;;                                                   size)
+;;                               (setq scrap-process nil)
+;;                               (setq pages (cdr pages))
+;;                               (when pages
+;;                                 (scrap-display-pages pages)))))))
+
+;; NOTE More logical async version (probably)
+;; (defun scrap-display-pages (pages &optional force)
+;;   ;; (print "RUNNING" #'external-debugging-output)
+;;   (dolist (p pages)
+;;     (let* ((size (scrap-page-size p))
+;;            (width (car size))
+;;                ;; (scale (/ (float w) (car (nth (1- p) scrap-internal-page-sizes))))
+;;                ;; (svg (svg-create w h))
+;;                ;; (data nil))
+;;                )
+;;     (unless scrap-process
+;;       (setq scrap-process
+;;             (pcase major-mode
+;;               ('papyrus-djvu-mode (start-process "ddjvu" "imdata" "ddjvu"
+;;                                                  (format "-size=%dx%d" width 5000)
+;;                                                  "-format=tiff"
+;;                                                  "-quality=50"
+;;                                                  (format "-pages=%d" p)
+;;                                                  (buffer-file-name)
+;;                                                  "/tmp/scrap-image"))
+;;               ('papyrus-mupdf-mode (start-process "mutool draw" "imdata" "mutool"
+;;                                                   "draw"
+;;                                                   "-o" "/tmp/scrap-image"
+;;                                                   "-F" "png"
+;;                                                   "-w" (number-to-string width)
+;;                                                   (buffer-file-name)
+;;                                                   (number-to-string p)))))
+;;       (set-process-sentinel scrap-process
+
+;;                             (lambda (_ _)
+;;                               (scrap-display-page p
+;;                                                   (with-temp-buffer
+;;                                                     (set-buffer-multibyte nil)
+;;                                                     (insert-file-contents-literally "/tmp/scrap-image")
+;;                                                     (buffer-string))
+;;                                                   size)
+;;                               (setq scrap-process nil)
+;;                               (setq pages (cdr pages))
+;;                               (when pages
+;;                                 ;; (run-with-timer 0.01 nil
+;;                                 ;;                 #'scrap-display-pages pages))))))))
+;;                                  (scrap-display-pages pages))))))))
 
 (defun scrap-display-pages (pages &optional force)
   ;; (print "RUNNING" #'external-debugging-output)
   (scrap-debug "display pages %s" pages)
-  (pcase-let* ((size (scrap-page-size (car pages)))
-               (`(,w . ,h) size))
-      (dolist (page pages)
-        (let* ((internal-size (nth (1- page) scrap-internal-page-sizes))
-               (scale (/ (float w) (car internal-size)))
-               (svg (svg-create w h))
+  (let* ((size (scrap-page-size (car pages)))
+         (width (car size)))
+    (dolist (page pages)
+      ;; (let (;; (scale (/ (float w) (car internal-size)))
 
-               ;; NOTE we would like to store the data in the overlay, but the
-               ;; overlay-put function in the `scrap-redisplay' function seems
-               ;; to not delete the data quickly enough
-               (data  ; (or (scrap-overlay-get page 'data) 
-                (funcall scrap-image-data-function page w))
+      ;;       ;; NOTE we would like to store the data in the overlay, but the
+      ;;       ;; overlay-put function in the `scrap-redisplay' function seems
+      ;;       ;; not to delete the data quickly enough
+      ;;       (data  ; (or (scrap-overlay-get page 'data))
+      ;;        (funcall scrap-image-data-function page 944)))
+        ;; (scrap-display-page page data size))))
+        (scrap-display-page page nil size))))
+
+(defun scrap-display-page (page &optional data size)
+  (pcase-let* ((`(,w . ,h) size)
+               (internal-size (nth (1- page) scrap-internal-page-sizes))
+               (scaling (/ (float scrap-svg-image-width) (car internal-size)))
+               (page-size (cons scrap-svg-image-width
+                                (round (* scaling (cdr internal-size)))))
+               (svg (svg-create (car page-size)
+                                (cdr page-size)))
                (text-elements (when (eq major-mode 'papyrus-djvu-mode)
                                 (djvu-text-elements 'char page)))
                (annots (when (eq major-mode 'papyrus-djvu-mode)
@@ -466,58 +617,85 @@ columns"
                                       ('align (message "Horizontal annot vertical align should be %s %s (not (yet) implemented)"
                                                        (nth 1 annot) (nth 2 annot)))
 
-                                    ;; (message "%s %s %s %s" c internal-size 'djvu size))
+                                      ;; (message "%s %s %s %s" c internal-size 'djvu size))
                                       ('maparea (scrap-annot-to-hotspot a internal-size size))))
                                   annots))
+               (swiper-matches (scrap-swiper-matches page))
                ;; (map (mapcar (lambda (c)
                ;;                ;; (message "%s %s %s %s" c internal-size 'djvu size))
                ;;                (scrap-text-component-to-hotspot c internal-size 'djvu size))
                ;;              text-elements))
                (image nil))
-          (unless w (print "NO W" #'external-debugging-output))
-          (when scrap-djvu-svg-embed
+    (when scrap-svg-embed
+      (if data
+          (if (eq major-mode 'papyrus-pymupdf-mode)
+              (papyrus-pdf-epc-svg-embed-base64 svg data "image/png")
             (svg-embed svg data
                        (pcase scrap-image-type
                          ('png "image/png")
                          ('tiff "image/tiff")
                          ('pnm "image/x-portable-bitmap"))
-                       t)
-            (setq svg (append svg (list (scrap-annots-to-svg annots internal-size size)))))
-                 ;; (when-let (rects (alist-get page papyrus-current-rectangles))
-                 ;; (mapcar (lambda (c)
-                 ;;           (apply #'svg-rectangle
-                 ;;                  svg
-                 ;;                  (append (mapcar (lambda (m)
-                 ;;                                    (round (* scale m)))
-                 ;;                                  (papyrus-coords-to-svg
-                 ;;                                   (cdr (nth (1- page) scrap-internal-page-sizes))
-                 ;;                                   (seq-subseq c 0 4)))
-                 ;;                          (seq-subseq c 4))))
-                 ;;         rects)
-                 ;;   )
-                 ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
-          (setq image (apply (if scrap-djvu-svg-embed
+                       t))
+        (svg-embed svg
+                   (concat "/tmp/"
+                           (file-name-as-directory
+                            (file-name-base (buffer-file-name)))
+                           "pages/"
+                           (format "page-%d.%s" page (symbol-name scrap-image-type)))
+                   (pcase scrap-image-type
+                     ('png "image/png")
+                     ('tiff "image/tiff")
+                     ('pnm "image/x-portable-bitmap"))
+                   nil))
+      (setq svg (append svg
+                        (list (scrap-annots-to-svg annots internal-size page-size))
+                        (when swiper-matches
+                          (list (scrap-matches-to-svg swiper-matches internal-size page-size)))
+                        (when scrap-search-state
+                          (let ((n (car scrap-search-state))
+                                (matches (copy-sequence (cdr scrap-search-state)))) ;TODO calculate 'to svg' here
+                            (setf (nth n matches) (append (cl-subseq (nth n matches) 0 5) (list :fill "green")))
+                            (let ((page-matches (cl-remove-if-not (lambda (m)
+                                                                    (= (car m) page))
+                                                                  matches)))
+                              (list (scrap-matches-to-svg (mapcar #'cdr page-matches) internal-size page-size))))))))
+    ;; (when-let (rects (alist-get page papyrus-current-rectangles))
+    ;; (mapcar (lambda (c)
+    ;;           (apply #'svg-rectangle
+    ;;                  svg
+    ;;                  (append (mapcar (lambda (m)
+    ;;                                    (round (* scale m)))
+    ;;                                  (papyrus-coords-to-svg
+    ;;                                   (cdr (nth (1- page) scrap-internal-page-sizes))
+    ;;                                   (seq-subseq c 0 4)))
+    ;;                          (seq-subseq c 4))))
+    ;;         rects)
+    ;;   )
+    ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
+    (setq image (apply (if scrap-svg-embed
                                  (apply-partially #'svg-image svg)
                                (apply-partially #'create-image data scrap-image-type t))
-                             (list :margin `(,scrap-horizontal-margin . ,scrap-vertical-margin)
+                             (list :width w
+                                   :margin (cons scrap-horizontal-margin scrap-vertical-margin)
                                    :pointer 'arrow
                                    :map annot-map)))
-          ;; (when scrap-center
-          ;;   (overlay-put o 'before-string
-          ;;                (when (> (window-pixel-width) w)
-          ;;                  (propertize " " 'display
-          ;;                              `(space :align-to
-          ;;                                      (,(floor (/ (- (window-pixel-width) w) 2))))))))
-          (dolist (hs annot-map)
-            (local-set-key
-             (vector (nth 1 hs) 'mouse-1)
-             (lambda (event)
-               (interactive "@e")
-               (let ((a (seq-find (lambda (i) (eq (posn-area (nth 1 event)) (nth 1 i)))
-                                  annot-map)))
-                 (scrap-goto-page (plist-get (nth 2 a) 'help-echo))))))
-          (overlay-put (scrap-overlay page) 'data data)
-          (overlay-put (scrap-overlay page) 'display image)))))
+    (when (= (scrap-columns) 1)
+      (overlay-put (scrap-overlay page) 'before-string
+                   (when (> (window-pixel-width) w)
+                     (propertize " " 'display
+                                 `(space :align-to
+                                         (,(floor (/ (- (window-pixel-width) w) 2))))))))
+    (dolist (hs annot-map)
+      (local-set-key
+       (vector (nth 1 hs) 'mouse-1)
+       (lambda (event)
+         (interactive "@e")
+         (let ((a (seq-find (lambda (i) (eq (posn-area (nth 1 event)) (nth 1 i)))
+                            annot-map)))
+           (scrap-goto-page (plist-get (nth 2 a) 'help-echo))))))
+    (when data
+      (overlay-put (scrap-overlay page) 'data data))
+    (overlay-put (scrap-overlay page) 'display image)))
 
 (defun scrap-goto-page-start ()
   (interactive)
@@ -531,8 +709,8 @@ columns"
              (prefix-numeric-value current-prefix-arg)
            (read-number "Page: "))))
   ;; (unless (and (>= page 1)
-               ;; (<= page scrap-last-page))
-    ;; (error "No such page: %d" page))
+  ;; (<= page scrap-last-page))
+  ;; (error "No such page: %d" page))
   (unless window
     (setq window
           ;; (if (pdf-util-pdf-window-p)
@@ -551,14 +729,22 @@ columns"
       (when (window-live-p window)
         (scrap-display-pages (list page))
         (goto-char (scrap-page-pos page))
-        (scrap-update))
-      ;; (when changing-p
-      ;;   (run-hooks 'scrap-after-change-page-hook))
+        (scrap-update)
+        )
+      (when changing-p
+        (run-hooks 'scrap-after-change-page-hook))
       ;; (when changing-p
       ;;   (pdf-view-deactivate-region)
       ;;   (force-mode-line-update)
       ;;   (run-hooks 'pdf-view-after-change-page-hook))))
       nil)))
+
+(defun scrap-goto-pos (page vscroll &optional window)
+  "Go to PAGE in document."
+  ;; first adjusting the scroll and then go to page displays smoothly
+  (image-set-window-vscroll vscroll)
+  (scrap-goto-page page window))
+
 
 (defun scrap-scroll-forward (&optional screen)
   (interactive)
@@ -568,7 +754,8 @@ columns"
     (cond ((> new-vscroll (cdr (scrap-current-size)))
            (forward-line)
            (image-set-window-vscroll 0) ;or set to vertical margin
-           (scrap-update))
+           (scrap-update)
+           (image-mode-window-put 'position (point)))
           ((> (+ new-vscroll (window-text-height nil t)) (cdr (scrap-current-size)))
            (cond ((and (= (scrap-columns) 1) (= (scrap-current-page) scrap-last-page))
                   (message "End of buffer"))
@@ -585,7 +772,7 @@ columns"
     (cond ((< new-vscroll 0)
            (if (<= (scrap-current-page) (scrap-columns))
                (image-set-window-vscroll 0) ;or set to vertical margin
-               (message "Beginning of buffer")
+             (message "Beginning of buffer")
              (forward-line -1)
              (image-set-window-vscroll (cdr (scrap-current-size)))
              (scrap-update)))
@@ -626,15 +813,20 @@ The number of COLUMNS can be set with a numeric prefix argument."
          (buf (get-buffer buffer-name))
          (file (buffer-file-name))
          (output-dir (concat "/tmp/"
-                             (file-name-as-directory (file-name-base file))))
+                             (file-name-as-directory (file-name-base file))
+                             "thumbs/"))
          (last-page scrap-last-page)
-         (win (selected-window)))
+         (win (selected-window))
+         (mode major-mode))
     (or (and buf
-             (= (buffer-local-value 'scrap-thumbs-columns buf) columns)) 
+             (= (buffer-local-value 'scrap-thumbs-columns buf) columns))
 
         (with-current-buffer (get-buffer-create buffer-name)
           (unless (file-exists-p output-dir)
-            (djvu-decode-thumbs file))
+            (funcall (pcase mode
+                       ('papyrus-djvu-mode #'djvu-decode-thumbs)
+                       ('papyrus-mupdf-mode #'mupdf-create-thumbs))
+                     file))
           (scrap-thumbs-mode)
           (setq scrap-thumbs-columns columns)
           (let ((inhibit-read-only t))
@@ -648,8 +840,13 @@ The number of COLUMNS can be set with a numeric prefix argument."
                 (let* ((p (1+ i))
                        (svg (copy-sequence source-svg))
                        (im (create-image (concat output-dir
-                                                  (format "thumb%d.tif" p))
-                                         'tiff
+                                                       (format "thumb%d." p)
+                                                       (pcase mode
+                                                         ('papyrus-djvu-mode "tif")
+                                                         ('papyrus-mupdf-mode "png")))
+                                         (pcase mode
+                                           ('papyrus-djvu-mode 'tiff)
+                                           ('papyrus-mupdf-mode 'png))
                                          nil
                                          :margin '(2 . 1))))
                   (apply #'insert-button (format "%03d " p)
@@ -728,6 +925,15 @@ The number of COLUMNS can be set with a numeric prefix argument."
            (scrap-coords-normalize coords from-size from-type)
            to-size to-type)))
 
+(defun scrap-coords-to-svg (page coords)
+  (let ((internal-size (scrap-internal-size page))
+        (size (scrap-page-size page)))
+    (scrap-coords-convert coords internal-size
+                          (pcase major-mode
+                            ('papyrus-djvu-mode 'djvu)
+                            ('papyrus-mupdf-mode 'pdf))
+                          size 'svg)))
+
 ;;; Hotspots
 
 (defun scrap-text-coords-to-hotspot-rect (coords from-size from-type to-size)
@@ -736,6 +942,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
                                               (scrap-coords-normalize coords from-size from-type)
                                               (list w h w h))))
     `(rect . ((,x0 . ,y0) . (,x1 . ,y1)))))
+
 
 (defun scrap-hotspot-rect-to-text-coords (area from-size to-size to-type)
   (pcase-let* ((`(rect . ((,x0 . ,y0) . (,x1 . ,y1))) area))
@@ -780,6 +987,49 @@ The number of COLUMNS can be set with a numeric prefix argument."
                              :opacity 0.3)))))
     svg-annots))
 
+(defun scrap-matches-to-svg (matches from-size to-size)
+  (let ((svg-matches (svg-group :id 'matches)))
+    (dolist (m matches)
+      (apply #'svg-rectangle
+             svg-matches
+             (append (scrap-coords-convert (cl-subseq m 0 4)
+                                           from-size
+                                           (pcase major-mode
+                                             ('papyrus-djvu-mode 'djvu)
+                                             (_ 'pdf))
+                                           to-size 'svg)
+                     (list :fill (or (plist-get m :fill) "yellow")
+                           :opacity (or (plist-get m :opacity) 0.3)))))
+    svg-matches))
+
+;;; search
+(defvar-local scrap-search-state nil)
+
+(defun scrap-search (word)
+  (interactive "sEnter search pattern: ")
+  (let ((results (funcall (pcase major-mode
+                            ('papyrus-djvu-mode
+                             #'djvu-search-word)
+                            ((or 'papyrus-pymupdf-mode
+                                 'papyrus-mupdf-mode)
+                             #'poppler-search-word))
+                          word)))
+    (setq scrap-search-state (cons 0 results))
+    (let* ((page (caadr scrap-search-state))
+           (coords (scrap-coords-to-svg page (cl-subseq (cadr scrap-search-state) 1 5))))
+      (scrap-goto-pos page (max (- (nth 1 coords) (/ (window-pixel-height) 2)) 0)))))
+
+(defun scrap-search-next ()
+  (interactive)
+  (unless (nth (cl-incf (car scrap-search-state)) (cdr scrap-search-state))
+    (setf (car scrap-search-state) 0))
+  (let* ((n (car scrap-search-state))
+         (m (nth n (cdr scrap-search-state)))
+         (page (car m))
+         ;; (coords (scrap-coords-djvu-to-svg page (cl-subseq m 1 5))))
+         (coords (scrap-coords-to-svg page (cl-subseq m 1 5))))
+    ;; first adjusting the scroll and then go to page displays smoothly
+    (scrap-goto-pos page (max (- (nth 1 coords) (/ (window-pixel-height) 2)) 0))))
 
 ;;; debug
 (defun scrap-debug (format-string &rest args)

@@ -1,3 +1,7 @@
+#+TITLE: Scrap developers manual
+
+* Introduction
+
 * Notes
 
 #+begin_src emacs-lisp
