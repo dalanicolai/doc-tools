@@ -2,6 +2,16 @@
 
 ;;; Comments
 
+;; In the precursory package, image-roll.el, we calculated the visible overlays
+;; via the point and vscroll positions. However, Emacs already provides the
+;; function `overlays-in', to which we can simply pas the window-start and
+;; window-end positions. Using this functionality greatly reduced the complexity
+;; of the code in the current package.
+
+;; In general we select functionality on major-mode, instead of file-type, as a
+;; single file-type (e.g. pdf), can have multiple backends (i.e major-modes,
+;; e.g., for pdf, pymupdf, mupdf, poppler etc.)
+
 ;; TODO maybe clean up some overlays at some point like in
 ;; `pdf-view-new-window-function'
 
@@ -9,7 +19,8 @@
 (require 'svg)
 (require 'cl-lib)
 
-(defun svg-group (&rest args)
+(defun svg-group (&optional id &rest args)
+  (when id (setq args (append (list :id id) args)))
   (apply #'dom-node
          'g
          `(,(svg--arguments nil args))))
@@ -106,12 +117,23 @@ Each element is a cons of the form (width . height). Usually this
 should just be a list of the document its intrinsic page sizes.")
 
 (defvar-local scrap-last-page 0)
-;; (defvar-local scrap-structured-contents nil)
+(defvar-local scrap-contents nil)
+(defvar-local scrap-structured-contents nil)
 (defvar-local scrap-image-type nil)
 (defvar-local scrap-image-data-function nil)
 (defvar-local scrap-thumbs-columns nil)
 (defvar-local scrap-fit-height nil)
 (defvar-local scrap-imenu-index nil)
+
+(defvar-local scrap-annots nil
+  "Container for annots.
+Its structure is an list with elements of the structure
+(PAGE . (MODIFIED . PAGE-ANNOTS)).
+
+This variable is only used when there is no server that keeps
+track of the state of the document.")
+
+(defvar-local scrap-active-region nil)
 
 (defvar-local scrap-info-function nil)
 
@@ -158,9 +180,18 @@ Setf-able function."
   (overlay-get (nth (1- page) (scrap-overlays winprops)) 'swiper-matches))
 
 ;;; utils
-(defun scrap-info (&optional arg)
-  (interactive "P")
-  (call-interactively scrap-info-function arg))
+(defvar-local scrap-info-commands '(scrap-cache-folder-size))
+
+(defun scrap-info (function &optional arg)
+  "Return size of file its cache folder.
+Folder contains thumb and page images."
+  (interactive (list (intern-soft (completing-read "Select info type: "
+                                                   (append scrap-info-commands
+                                                           (list scrap-info-function))))
+                     current-prefix-arg))
+  (if (eq function scrap-info-function)
+      (call-interactively function arg)
+    (pp (call-interactively function arg))))
 
 (defun scrap-image-p (object)
   (eq (car object) 'image))
@@ -191,6 +222,14 @@ Setf-able function."
 (defsubst scrap-page-pos (page &optional window)
   (overlay-start (nth (1- page) (scrap-overlays window))))
 
+(defun scrap-cache-folder-size (&optional _)
+  (interactive)
+  (car (split-string (shell-command-to-string
+                      (format "du -sh '%s'"
+                              (concat "/tmp/"
+                                      (file-name-as-directory
+                                       (file-name-base (buffer-file-name)))))))))
+
 ;; (define-derived-mode scrap-mode special-mode "Scrap"
 
 ;;   (setq cursor-type nil)
@@ -201,6 +240,7 @@ Setf-able function."
 ;;   ;; reapplies the vscroll, so we simply initialize the
 ;;   ;; `image-mode-winprops-alist' here, and add lines from
 ;;   ;; `image-mode-reapply-winprops' at the start of `scrap-redisplay'.
+
 ;;   (add-hook 'window-configuration-change-hook 'scrap-redisplay nil t)
 ;;   (add-hook 'image-mode-new-window-functions 'scrap-new-window-function nil t)
 ;;   (setq image-mode-winprops-alist nil)
@@ -229,14 +269,90 @@ Setf-able function."
         (define-key map "f" 'scrap-fit-toggle)
         (define-key map "c" 'scrap-set-columns)
         (define-key map "t" 'scrap-thumbs)
+        (define-key map "T" 'scrap-page-text)
+        (define-key map "i" 'scrap-info)
+        (define-key map "y" 'scrap-kill-new)
+        (define-key map (kbd "C-s") 'scrap-search)
+        ;; (define-key map [down-mouse-1] 'scrap-select-region)
+        ;; (define-key map [S-down-mouse-1] 'scrap-select-region-free)
         map))
+
+(defun scrap-select-region-free (event)
+  (interactive "@e")
+  (scrap-select-region event t))
+
+(defun scrap-select-region (event &optional free)
+  "Draw objects interactively via a mouse drag EVENT. "
+  (interactive "@e")
+  (let* ((start (event-start event))
+         (page (nth 1 start))
+         (start-point (scrap-coords-point-scale page (posn-object-x-y start)))
+         (text (nth (1- page) scrap-structured-contents))
+         first-element
+         result)
+    ;; NOTE we either must pass page to the 'papyrus-djvu-get-regions' and pdf
+    ;; version functions, or we should correct the coords for djvu here, we
+    ;; choose the second option. DON'T SET THIS IN THE TRACK MOUSE WHILE LOOP
+    (when (eq major-mode 'papyrus-djvu-mode)
+      (setq start-point (cons (car start-point)
+                              (- (cdr (scrap-internal-size page)) (cdr start-point)))))
+    (track-mouse
+      (while (not (memq (car event) '(drag-mouse-1 S-drag-mouse-1)))
+        (setq event (read-event))
+        (let* ((end (event-end event))
+               (end-point (scrap-coords-point-scale page (posn-object-x-y end))))
+          (when (eq major-mode 'papyrus-djvu-mode)
+            ;; NOTE see note above 'track-mouse' about correcting coords
+            (setq end-point (cons (car end-point)
+                                  (- (cdr (scrap-internal-size page)) (cdr end-point)))))
+          ;; (scrap-debug "%s %s" start-point end-point)
+          ;; (scrap-debug "%s"
+          ;; (print "hoi")
+          (setq scrap-active-region
+                (cons page
+                      (if free
+                          (pcase-let ((`(,x0 . ,y0) start-point)
+                                      (`(,x1 . ,y1) end-point))
+                            (list (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1))))
+                        (funcall (pcase major-mode
+                                   ('papyrus-pymupdf-mode #'papyrus-pymupdf-word-at-point)
+                                   ('papyrus-djvu-mode #'papyrus-djvu-get-regions))
+                                 text start-point end-point))))
+          (scrap-display-page page))))))
+
+(defun scrap-kill-new ()
+  (interactive)
+  (kill-new (scrap-active-region-text))
+  (setq scrap-active-region nil)
+  (scrap-update t))
+
+(defun scrap-active-region-text ()
+  (mapconcat (lambda (e)
+               (nth 4 e))
+             (cdr scrap-active-region)
+             "\n"))
+
+(defun scrap-active-regions (regions)
+  (mapcar (lambda (r) (print (if (nthcdr 4 r) (butlast r) r))) regions))
+
+(defun scrap-page-text (&optional arg)
+  (interactive "P")
+  (pp (djvu-structured-text 'plain (if arg
+                                       (read-number "Page: ")
+                                     (scrap-current-page)))
+      (pop-to-buffer (get-buffer-create "*djvu-text*"))))
+
+
+                                        ;numbers
+;; (let* ((start (event-start event)))
+;;   (print start)))
 
 (when (featurep 'evil)
   (evil-define-key 'motion scrap-mode-map
     "j" 'scrap-scroll-forward
     "k" 'scrap-scroll-backward
-    ;; (kbd "<down>") 'scrap-scroll-forward
-    ;; (kbd "<up>") 'scrap-scroll-backward
+    (kbd "<down>") 'scrap-scroll-forward
+    (kbd "<up>") 'scrap-scroll-backward
     (kbd "<wheel-down>") 'scrap-scroll-forward
     (kbd "<wheel-up>") 'scrap-scroll-backward
     ;; (kbd "<mouse-5>") 'scrap-scroll-forward
@@ -253,7 +369,11 @@ Setf-able function."
     "f" 'scrap-fit-toggle
     "c" 'scrap-set-columns
     "t" 'scrap-thumbs
-    "n" 'scrap-search-next))
+    "T" 'scrap-page-text
+    "n" 'scrap-search-next
+    "i" 'scrap-info
+    "y" 'scrap-kill-new
+    [down-mouse-1] 'scrap-select-region))
 
 (define-minor-mode scrap-minor-mode
   "Scrap"
@@ -273,7 +393,14 @@ Setf-able function."
 
   (dolist (m '(global-hl-line-mode))
     (if (fboundp m)
-        (funcall m 0))))
+        (funcall m 0)))
+
+  ;; (setq-local mode-line-format
+  (setq-local mode-line-position
+              `(" P" (:eval (number-to-string (scrap-current-page)))
+                ;; Avoid errors during redisplay.
+                "/" ,(number-to-string scrap-last-page)))
+)
 
 (defun scrap-redisplay (&optional force)
   ;; if new window then, (scrap-columns) calls `image-mode-winprops' which runs
@@ -321,7 +448,7 @@ Setf-able function."
       (setf (scrap-columns) columns))
     ;; (sit-for 0.01) ;NOTE does not help for display issue
     (scrap-update)))
-    ;; (run-with-timer 0.01 nil #'scrap-update)))
+;; (run-with-timer 0.01 nil #'scrap-update)))
 
 ;; NOTE this function is called via `scrap-columns' in `scrap-redisplay'. The
 ;; function runs twice on first window creation, once for winprops of 'selected
@@ -443,7 +570,7 @@ columns"
 ;; buffer when a new window is created (and possibly at other times also). So we
 ;; test for the condition and at a new-window flag/argument to 'circumvent' the
 ;; condition. TODO we should then pass the correct page to be displayed.
-(defun scrap-update ()
+(defun scrap-update (&optional current)
   (interactive)
   (let* ((visible (scrap-debug "%s" (scrap-visible-pages)))
          (displayed (scrap-displayed-images))
@@ -462,8 +589,10 @@ columns"
                                                           (when (scrap-image-p display-prop)
                                                             (= (car (image-size display-prop)) w))))
                                                       pages)))
-             (when (scrap-debug "%s" non-exisiting-images)
-               (scrap-display-pages non-exisiting-images)))))))
+             (if current
+                 (scrap-display-pages displayed)
+               (when (scrap-debug "%s" non-exisiting-images)
+                 (scrap-display-pages non-exisiting-images))))))))
 
 
 (defun scrap-visible-pages ()
@@ -497,7 +626,7 @@ columns"
 
 (defvar scrap-process nil)
 
-;; NOTE pdf-tools style async (se next for more logical async version)
+;; NOTE pdf-tools style async (see next for more logical async version)
 ;; (defun scrap-display-pages-async (pages &optional force)
 ;;   ;; (print "RUNNING" #'external-debugging-output)
 ;;   (pcase-let* ((size (scrap-page-size (car pages)))
@@ -583,50 +712,57 @@ columns"
 (defun scrap-display-pages (pages &optional force)
   ;; (print "RUNNING" #'external-debugging-output)
   (scrap-debug "display pages %s" pages)
-  (let* ((size (scrap-page-size (car pages)))
-         (width (car size)))
-    (dolist (page pages)
-      ;; (let (;; (scale (/ (float w) (car internal-size)))
+  (dolist (page pages)
+    ;; (let ((scale (/ (float w) (car internal-size)))
 
-      ;;       ;; NOTE we would like to store the data in the overlay, but the
-      ;;       ;; overlay-put function in the `scrap-redisplay' function seems
-      ;;       ;; not to delete the data quickly enough
-      ;;       (data  ; (or (scrap-overlay-get page 'data))
-      ;;        (funcall scrap-image-data-function page 944)))
-        ;; (scrap-display-page page data size))))
-        (scrap-display-page page nil size))))
+    ;; NOTE we would like to store the data in the overlay, but the
+    ;; overlay-put function in the `scrap-redisplay' function seems
+    ;; not to delete the data quickly enough
 
-(defun scrap-display-page (page &optional data size)
-  (pcase-let* ((`(,w . ,h) size)
-               (internal-size (nth (1- page) scrap-internal-page-sizes))
-               (scaling (/ (float scrap-svg-image-width) (car internal-size)))
-               (page-size (cons scrap-svg-image-width
-                                (round (* scaling (cdr internal-size)))))
-               (svg (svg-create (car page-size)
-                                (cdr page-size)))
-               (text-elements (when (eq major-mode 'papyrus-djvu-mode)
-                                (djvu-text-elements 'char page)))
-               (annots (when (eq major-mode 'papyrus-djvu-mode)
-                         (djvu-annots page)))
-               (annot-map (mapcar (lambda (a)
-                                    (pcase (car a)
-                                      ('background (message "Viewer background color should be %s (not (yet) implemented)"
-                                                            (car annot)))
-                                      ('zoom (message "Zoom value should be %s (not (yet) implemented)" (car annot)))
-                                      ('mode (message "Mode value should be %s (not (yet) implemented)" (car annot)))
-                                      ('align (message "Horizontal annot vertical align should be %s %s (not (yet) implemented)"
-                                                       (nth 1 annot) (nth 2 annot)))
+    ;; (let ((data (pymupdf-epc-page-svg-data page t)))
+    (let ((data (pcase major-mode
+                  ('papyrus-epdf-mode (funcall scrap-image-data-function page scrap-svg-image-width)))))
+           ;; (base64-decode-string
+                 ;; (pymupdf-epc-page-base64-image-data page
+                                                     ;; scrap-svg-image-width))))
+                                        ; (or (scrap-overlay-get page 'data))
+    ;;  (when (eq major-mode 'papyrus-pymupdf-mode)
+    ;;    (funcall scrap-image-data-function page width))))
+      ;; (scrap-display-page page nil)))
+      (scrap-display-page page data))))
 
-                                      ;; (message "%s %s %s %s" c internal-size 'djvu size))
-                                      ('maparea (scrap-annot-to-hotspot a internal-size size))))
-                                  annots))
-               (swiper-matches (scrap-swiper-matches page))
-               ;; (map (mapcar (lambda (c)
-               ;;                ;; (message "%s %s %s %s" c internal-size 'djvu size))
-               ;;                (scrap-text-component-to-hotspot c internal-size 'djvu size))
-               ;;              text-elements))
-               (image nil))
+(defun scrap-display-page (page &optional data)
+  (let* ((image-size (scrap-page-size page))
+         (internal-size (nth (1- page) scrap-internal-page-sizes))
+         (scaling (/ (float scrap-svg-image-width) (car internal-size)))
+         (overlay-size (cons scrap-svg-image-width
+                                   (round (* scaling (cdr internal-size)))))
+         (svg (svg-create (car overlay-size)
+                          (cdr overlay-size)))
+         (text-elements (when (eq major-mode 'papyrus-djvu-mode)
+                          (djvu-text-elements 'char page)))
+         (annots (when (eq major-mode 'papyrus-djvu-mode)
+                   (scrap-annots page)))
+         (annot-map (mapcar (lambda (a)
+                              (pcase (car a)
+                                ('background (message "Viewer background color should be %s (not (yet) implemented)"
+                                                      (car annot)))
+                                ('zoom (message "Zoom value should be %s (not (yet) implemented)" (car annot)))
+                                ('mode (message "Mode value should be %s (not (yet) implemented)" (car annot)))
+                                ('align (message "Horizontal annot vertical align should be %s %s (not (yet) implemented)"
+                                                 (nth 1 annot) (nth 2 annot)))
+
+                                ;; (message "%s %s %s %s" c internal-size 'djvu size))
+                                ('maparea (scrap-annot-to-hotspot a internal-size overlay-size))))
+                            annots))
+         (swiper-matches (scrap-swiper-matches page))
+         ;; (map (mapcar (lambda (c)
+         ;;                ;; (message "%s %s %s %s" c internal-size 'djvu size))
+         ;;                (scrap-text-component-to-hotspot c internal-size 'djvu size))
+         ;;              text-elements))
+         image)
     (when scrap-svg-embed
+      ;; (when (eq major-mode 'papyrus-djvu-mode)
       (if data
           (if (eq major-mode 'papyrus-pymupdf-mode)
               (papyrus-pdf-epc-svg-embed-base64 svg data "image/png")
@@ -648,9 +784,11 @@ columns"
                      ('pnm "image/x-portable-bitmap"))
                    nil))
       (setq svg (append svg
-                        (list (scrap-annots-to-svg annots internal-size page-size))
+                        (list (scrap-annots-to-svg annots internal-size overlay-size))
                         (when swiper-matches
-                          (list (scrap-matches-to-svg swiper-matches internal-size page-size)))
+                          (list (scrap-matches-to-svg swiper-matches internal-size overlay-size)))
+                        (when (and scrap-active-region (= page (car scrap-active-region)))
+                          (list (scrap-regions-to-svg (cdr scrap-active-region) internal-size overlay-size)))
                         (when scrap-search-state
                           (let ((n (car scrap-search-state))
                                 (matches (copy-sequence (cdr scrap-search-state)))) ;TODO calculate 'to svg' here
@@ -658,33 +796,29 @@ columns"
                             (let ((page-matches (cl-remove-if-not (lambda (m)
                                                                     (= (car m) page))
                                                                   matches)))
-                              (list (scrap-matches-to-svg (mapcar #'cdr page-matches) internal-size page-size))))))))
-    ;; (when-let (rects (alist-get page papyrus-current-rectangles))
-    ;; (mapcar (lambda (c)
-    ;;           (apply #'svg-rectangle
-    ;;                  svg
-    ;;                  (append (mapcar (lambda (m)
-    ;;                                    (round (* scale m)))
-    ;;                                  (papyrus-coords-to-svg
-    ;;                                   (cdr (nth (1- page) scrap-internal-page-sizes))
-    ;;                                   (seq-subseq c 0 4)))
-    ;;                          (seq-subseq c 4))))
-    ;;         rects)
-    ;;   )
-    ;; (svg-rectangle svg 0 0 100 100 :fill "blue")
+                              (list (scrap-matches-to-svg (mapcar #'cdr page-matches) internal-size overlay-size))))))))
+    ;; (setq image (apply (if (eq major-mode 'papyrus-djvu-mode) ;scrap-svg-embed
     (setq image (apply (if scrap-svg-embed
-                                 (apply-partially #'svg-image svg)
-                               (apply-partially #'create-image data scrap-image-type t))
-                             (list :width w
-                                   :margin (cons scrap-horizontal-margin scrap-vertical-margin)
-                                   :pointer 'arrow
-                                   :map annot-map)))
+                           (apply-partially #'svg-image svg)
+                         (apply-partially #'create-image data 'png t))
+                       (list :width (car image-size)
+                             :margin (cons scrap-horizontal-margin scrap-vertical-margin)
+                             :map
+                             (append annot-map
+                                     `(((rect . ((0 . 0) . (,(car image-size) . ,(cdr image-size))))
+                                        ;; `(((rect . ((0 . 0) . (100 . 100)))
+                                        ;; :map '(((rect . ((0 . 0) . (800 . 600)))
+                                        ,page
+                                        (pointer arrow)))
+                                     (when (eq major-mode 'papyrus-epdf-mode)
+				       (pdf-links-hotspots-function page image-size))))))
+    ;; (image-flush image)
     (when (= (scrap-columns) 1)
       (overlay-put (scrap-overlay page) 'before-string
-                   (when (> (window-pixel-width) w)
+                   (when (> (window-pixel-width) scrap-svg-image-width)
                      (propertize " " 'display
                                  `(space :align-to
-                                         (,(floor (/ (- (window-pixel-width) w) 2))))))))
+                                         (,(floor (/ (- (window-pixel-width) scrap-svg-image-width) 2))))))))
     (dolist (hs annot-map)
       (local-set-key
        (vector (nth 1 hs) 'mouse-1)
@@ -692,7 +826,10 @@ columns"
          (interactive "@e")
          (let ((a (seq-find (lambda (i) (eq (posn-area (nth 1 event)) (nth 1 i)))
                             annot-map)))
-           (scrap-goto-page (plist-get (nth 2 a) 'help-echo))))))
+           (scrap-goto-page (plist-get (nth 2 a) 'help-echo)))))
+      (local-set-key
+       (vector (nth 1 hs) t)
+       'scrap-select-region))
     (when data
       (overlay-put (scrap-overlay page) 'data data))
     (overlay-put (scrap-overlay page) 'display image)))
@@ -819,13 +956,14 @@ The number of COLUMNS can be set with a numeric prefix argument."
          (win (selected-window))
          (mode major-mode))
     (or (and buf
+             (buffer-local-value 'scrap-thumbs-columns buf)
              (= (buffer-local-value 'scrap-thumbs-columns buf) columns))
 
         (with-current-buffer (get-buffer-create buffer-name)
           (unless (file-exists-p output-dir)
             (funcall (pcase mode
                        ('papyrus-djvu-mode #'djvu-decode-thumbs)
-                       ('papyrus-mupdf-mode #'mupdf-create-thumbs))
+                       (_ #'mupdf-create-thumbs))
                      file))
           (scrap-thumbs-mode)
           (setq scrap-thumbs-columns columns)
@@ -840,13 +978,13 @@ The number of COLUMNS can be set with a numeric prefix argument."
                 (let* ((p (1+ i))
                        (svg (copy-sequence source-svg))
                        (im (create-image (concat output-dir
-                                                       (format "thumb%d." p)
-                                                       (pcase mode
-                                                         ('papyrus-djvu-mode "tif")
-                                                         ('papyrus-mupdf-mode "png")))
+                                                 (format "thumb%d." p)
+                                                 (pcase mode
+                                                   ('papyrus-djvu-mode "tif")
+                                                   (_ "png")))
                                          (pcase mode
                                            ('papyrus-djvu-mode 'tiff)
-                                           ('papyrus-mupdf-mode 'png))
+                                           (_ 'png))
                                          nil
                                          :margin '(2 . 1))))
                   (apply #'insert-button (format "%03d " p)
@@ -870,8 +1008,13 @@ The number of COLUMNS can be set with a numeric prefix argument."
                 (when (= (% i columns) (1- columns)) (insert "\n")))
               (goto-char (point-min))
 
-              (unless scrap-thumbs-show-page-numbers
-                (add-hook 'post-command-hook #'display-local-help nil t))))))
+              (setq-local mode-line-format
+                          `(" P" (:eval (button-get (button-at (point)) 'page))
+                            ;; Avoid errors during redisplay.
+                            "/" ,(number-to-string last-page)))
+              ;; (unless scrap-thumbs-show-page-numbers
+              ;;   (add-hook 'post-command-hook #'display-local-help nil t))
+              ))))
 
     (scrap-thumbs-show columns)))
 
@@ -903,7 +1046,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
     (pcase type
       ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
       ('svg (list x0 y0 (+ x0 dx) (+ y0 dy)))
-      ('djvu-annot (list x0 (- 1 (+ y0 dy)) dx (- 1 y0)))
+      ('djvu-annot (list x0 (- 1 (+ y0 dy)) (+ x0 dx) (- 1 y0)))
       (_ ratios))))
 
 (defun scrap-coords-denormalize (coords size &optional type)
@@ -933,6 +1076,12 @@ The number of COLUMNS can be set with a numeric prefix argument."
                             ('papyrus-djvu-mode 'djvu)
                             ('papyrus-mupdf-mode 'pdf))
                           size 'svg)))
+
+(defun scrap-coords-point-scale (page coords)
+  (pcase-let ((`(,iw . ,ih) (scrap-internal-size page))
+              (`(,w . ,h) (scrap-page-size page)))
+    (cons (* (/ (float iw) w) (car coords))
+          (* (/ (float ih) h) (cdr coords)))))
 
 ;;; Hotspots
 
@@ -972,23 +1121,22 @@ The number of COLUMNS can be set with a numeric prefix argument."
 ;;                                   (opacity 50)
 ;;                                   (none))
 ;;                         '(100 . 100)
-;;                         'djvu-annot
 ;;                         '(200 . 200))
 
 (defun scrap-annots-to-svg (annots from-size to-size)
-  (let ((svg-annots (svg-group :id 'annotations)))
+  (let ((svg-annots (svg-group 'annotations)))
     (dolist (a annots)
       (let* ((area (nth 3 a))
              (coords (cdr area)))
         (apply #'svg-rectangle
                svg-annots
                (append (scrap-coords-convert coords from-size 'djvu-annot to-size 'svg)
-                       (list :fill "yellow"
+                       (list :fill (car (alist-get 'hilite (nthcdr 4 a)))
                              :opacity 0.3)))))
     svg-annots))
 
 (defun scrap-matches-to-svg (matches from-size to-size)
-  (let ((svg-matches (svg-group :id 'matches)))
+  (let ((svg-matches (svg-group 'matches)))
     (dolist (m matches)
       (apply #'svg-rectangle
              svg-matches
@@ -1002,6 +1150,33 @@ The number of COLUMNS can be set with a numeric prefix argument."
                            :opacity (or (plist-get m :opacity) 0.3)))))
     svg-matches))
 
+(defun scrap-regions-to-svg (regions from-size to-size)
+  (let ((svg-regions (svg-group 'regions)))
+    (dolist (r (scrap-active-regions regions))
+      (apply #'svg-rectangle
+             svg-regions
+             (append (scrap-coords-convert r
+                                           from-size
+                                           (pcase major-mode
+                                             ('papyrus-djvu-mode 'djvu)
+                                             (_ 'pdf))
+                                           to-size 'svg)
+                     (list :fill (or (plist-get r :fill) "gray")
+                           :opacity (or (plist-get r :opacity) 0.3)))))
+    svg-regions))
+
+;;; annots
+(defun scrap-annots (page)
+  (declare (gv-setter (lambda (val)
+                        `(let ((c (alist-get ,page scrap-contents)))
+                           (if-let (a (assq 'annots c))
+                               (setcdr a ,val)
+                             (setf (nth 1 c) (cons 'annots ,val)))))))
+  (if (not (eq major-mode 'papyrus-pymupdf-mode))
+      (if-let (a (cddr (alist-get page scrap-annots)))
+          a
+        (alist-get 'annots
+                   (alist-get page scrap-contents)))))
 ;;; search
 (defvar-local scrap-search-state nil)
 
@@ -1030,6 +1205,11 @@ The number of COLUMNS can be set with a numeric prefix argument."
          (coords (scrap-coords-to-svg page (cl-subseq m 1 5))))
     ;; first adjusting the scroll and then go to page displays smoothly
     (scrap-goto-pos page (max (- (nth 1 coords) (/ (window-pixel-height) 2)) 0))))
+
+;;; outline
+(defun scrap-outline ()
+  (interactive)
+  (funcall scrap-outline-function))
 
 ;;; debug
 (defun scrap-debug (format-string &rest args)

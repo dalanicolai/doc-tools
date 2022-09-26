@@ -1,6 +1,65 @@
 #+TITLE: Scrap developers manual
 
 * Introduction
+This package provides a versatile Emacs document viewer/editor, combined with a
+set of tools for editing documents. Although the package has been written from
+scratch, it draws inspiration from other current document viewer/editor packages
+like doc-view, pdf-tools, and djvu. However, the goal of this package is to be,
+mostly, an improvement on the other packages, while, similar to doc-view,
+integrating all document viewing/editing into a single coherent, easier to
+understand and maintain, library.
+
+Please do not skip the 'Donate' section, if
+you are in a position to make a small or big donation.
+
+* Donate
+You are probably aware that Emacs is more than a wonderful editor, as in fact it
+is a tremendously fun and useful virtual lisp machine. Now if you are like me,
+you might have the idea, that Emacs could be an invaluable tool for quite some
+more students and academics, for organizing their work, processing their data
+and writing their documents. Although it would be hard to make Emacs do
+everything that professional, specialized 'scientific/engineering', programs do,
+Emacs can easily fulfill all of secondary education student's needs: providing a
+good calculator, a simple to use programmable (svg) plotting library, a
+sufficiently powerful drawing tool (see [[https://github.com/dalanicolai/sketch-mode][sketch-mode]] for a preliminary example,
+which could be much better if more resources were available, but the essence is
+that the drawing can be simultaneously coded and/or drawn). In fact creating
+such tools is not even that much work at all. Of course, the advantage to having
+it in Emacs, is that all the tools would come in a fully integrated environment,
+fully introspectable, easily hackable, and fully configurable, and well
+supporting your workflow. Indeed this could also be provided by the browser, but
+hacking on the browser is much more complex than hacking on Emacs, while at the
+same time the browser lacks any editing facilities.
+
+It is a pity (besides being unfair) to see that higher education institutions,
+pay tremendous amounts of money, to companies that do not provide them full
+access to their products, while at the same time there exist powerful free and
+open tools that receive no money at all, well... in comparison (think about
+this... we are not little children, are we?). If only those open communities,
+would receive the same amount of money, as the use-base of its product(s) in
+percentage, those open tools would by now have reached the level of the closed
+source tools. Speaking from experience, lack of money, is a big hindrance to the
+creation of useful open and free tools. Developing this package has cost me more
+than a (few) month(s) of full-time research and coding (which could have been
+much less if more and better documentation were available, which only isn't
+because of the lack of resources; volunteers would, additionally to spending
+weeks on developing their packages, have to spend another few weeks on
+documenting their packages).
+
+Writing this package (and especially finding out how to do it) has really been a
+few weeks of full time work already, and I have not written any documentation
+yet at all. At the same time, I think this package will enhance the computing
+experience, and improve the favorite tool, of many thousands of users, many of
+them spending lot's of money on their Apple computers. If all those thousands of
+users would only spend a fraction (i.e. a few dollars) on donation to this
+package (or Emacs). Then we all, and especially the struggling developers, would
+have a much better life. One dollar from you makes one thousand dollar a
+difference to the developers.
+
+Finally, keep in mind that giving to Emacs is like giving to charity, the money
+you donate is invested back into an Editor that everyone can (which does not
+mean 'should') use for free, also users, ALL over the world, who otherwise would
+not be able to use (and inspect) the editor (and it document viewing tools).
 
 * Notes
 
@@ -12,6 +71,12 @@
 
 #+RESULTS:
 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 15 | 20 | 24 | 30 | 40 | 60 |
+
+** djvu mouse selection
+Sometimes the text on different lines is not represented by a 'line element, in
+such cases selecting text by mouse may not work correctly. In such cases the
+text can be copied by using =M-x scrap-page-text= and copy the text from the text
+buffer.
 
 * Multiple Windows
 A buffer's text format is unique, so (without using overlays), the
