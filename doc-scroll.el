@@ -164,7 +164,7 @@ Setf-able function."
   "Return the overlay that hold page number PAGE.
 Implemented as macro to make it setf'able.
 TODO update docstring (no macro anymore)"
-  (nth (1- (or page (doc-scroll-current-page)))
+  (nth (1- (or page (doc-scroll-page-at-point)))
        (doc-scroll-overlays winprops)))
 
 (defun doc-scroll-overlay-get (page prop)
@@ -196,31 +196,54 @@ Folder contains thumb and page images."
 (defun doc-scroll-image-p (object)
   (eq (car object) 'image))
 
-(defsubst doc-scroll-page-size (page)
+(defun doc-scroll-overlay-size (page)
   "List of overlays that make up a scroll."
   (overlay-get (nth (1- page) (doc-scroll-overlays)) 'size))
 
-(defsubst doc-scroll-internal-size (page)
+(defun doc-scroll-internal-size (page)
   (nth (1- page) doc-scroll-internal-page-sizes))
 
-(defsubst doc-scroll-overlay-selected-window-filter (overlays)
+(defun doc-scroll-overlay-selected-window-filter (overlays)
   (cl-remove-if-not
    (lambda (overlay)
      (eq (overlay-get overlay 'window) (selected-window)))
    overlays))
 
-(defsubst doc-scroll-current-page (&optional window)
+(defun doc-scroll-page-at-point (&optional window)
   (interactive)
   (overlay-get (car (overlays-at (point))) 'page))
 
-(defsubst doc-scroll-current-size ()
+(defun doc-scroll-current-page (&optional winprops)
+  "List of overlays that make up a scroll.
+Setf-able function."
+  (declare (gv-setter (lambda (val)
+                        `(image-mode-window-put 'page ,val ,winprops))))
+  (image-mode-window-get 'page winprops))
+
+(defun doc-scroll-current-size ()
   (interactive)
   (overlay-get (car (doc-scroll-overlay-selected-window-filter
                      (overlays-at (point))))
                'size))
 
-(defsubst doc-scroll-page-pos (page &optional window)
+(defun doc-scroll-page-pos (page &optional window)
   (overlay-start (nth (1- page) (doc-scroll-overlays window))))
+
+(defun doc-scroll-vscroll-to-fscroll (vscroll)
+  (/ (float vscroll)
+     (cdr (doc-scroll-overlay-size (or (doc-scroll-current-page) 1)))))
+
+(defun doc-scroll-set-window-fscroll (vscroll)
+  "Set vscroll in units of current page height."
+  (let ((fscroll (doc-scroll-vscroll-to-fscroll vscroll)))
+    (setf (image-mode-window-get 'fscroll) fscroll)
+    (set-window-vscroll (selected-window) vscroll t)))
+
+(defun doc-scroll-fscroll-to-vscroll (fscroll &optional page)
+  (* fscroll
+     (cdr (doc-scroll-overlay-size (if page
+                                       (cdr (doc-scroll-overlay-size page))
+                                     (doc-scroll-current-page))))))
 
 (defun doc-scroll-cache-folder-size (&optional _)
   (interactive)
@@ -338,8 +361,8 @@ Folder contains thumb and page images."
 (defun doc-scroll-page-text (&optional arg)
   (interactive "P")
   (pp (doc-djvu-structured-text 'plain (if arg
-                                       (read-number "Page: ")
-                                     (doc-scroll-current-page)))
+                                           (read-number "Page: ")
+                                         (doc-scroll-page-at-point)))
       (pop-to-buffer (get-buffer-create "*djvu-text*"))))
 
 
@@ -389,7 +412,7 @@ Folder contains thumb and page images."
   ;; reapplies the vscroll, so we simply initialize the
   ;; `image-mode-winprops-alist' here, and add lines from
   ;; `image-mode-reapply-winprops' at the start of `doc-scroll-redisplay'.
-  (add-hook 'window-configuration-change-hook 'doc-scroll-redisplay nil t)
+  (add-hook 'window-configuration-change-hook 'doc-scroll-redisplay-all nil t)
   (add-hook 'image-mode-new-window-functions 'doc-scroll-new-window-function nil t)
   (setq image-mode-winprops-alist nil)
 
@@ -399,12 +422,16 @@ Folder contains thumb and page images."
 
   ;; (setq-local mode-line-format
   (setq-local mode-line-position
-              `(" P" (:eval (number-to-string (doc-scroll-current-page)))
+              `(" P" (:eval (number-to-string (doc-scroll-page-at-point)))
                 ;; Avoid errors during redisplay.
                 "/" ,(number-to-string doc-scroll-last-page)))
-)
+  )
 
-(defun doc-scroll-redisplay (&optional force)
+(defun doc-scroll-redisplay-all ()
+  (dolist (win (get-buffer-window-list))
+    (doc-scroll-redisplay nil (doc-scroll-debug "%s" win))))
+
+(defun doc-scroll-redisplay (&optional force window)
   ;; if new window then, (doc-scroll-columns) calls `image-mode-winprops' which runs
   ;; the `image-mode-new-window-functions' and sets up (a) new winprops(-alist)
   (doc-scroll-debug "REDISPLAY")
@@ -415,23 +442,23 @@ Folder contains thumb and page images."
     (setf (doc-scroll-window-width) (window-pixel-width))
 
     (let* ((columns (or (doc-scroll-columns) 1))
-           ;; (page-sizes (doc-scroll-desired-page-sizes
+           ;; (overlay-sizes (doc-scroll-desired-page-sizes
            ;;              doc-scroll-internal-page-sizes
            ;;              nil
            ;;              columns
            ;;              doc-scroll-horizontal-margin
            ;;              doc-scroll-vertical-margin))
-           (page-sizes (doc-scroll-desired-overlay-sizes
-                        doc-scroll-internal-page-sizes
-                        columns))
+           (overlay-sizes (doc-scroll-desired-overlay-sizes
+                           doc-scroll-internal-page-sizes
+                           columns))
            ;; (make-list pages (if (functionp doc-scroll-demo-page-size)
            ;;                      (funcall doc-scroll-demo-page-size)
            ;;                    doc-scroll-demo-page-size))))
            (n 0))
 
-      (dolist (page-size page-sizes)
-        (let* ((page-width (+ (car page-size) (* 2 doc-scroll-horizontal-margin)))
-               (overlay-heigth (+ (cdr page-size) (* 2 doc-scroll-vertical-margin)))
+      (dolist (overlay-size overlay-sizes)
+        (let* ((page-width (+ (car overlay-size) (* 2 doc-scroll-horizontal-margin)))
+               (overlay-heigth (+ (cdr overlay-size) (* 2 doc-scroll-vertical-margin)))
                (o (nth n (doc-scroll-overlays))))
           ;; (when doc-scroll-center
           ;;   (overlay-put o 'before-string
@@ -447,11 +474,13 @@ Folder contains thumb and page images."
           (overlay-put o 'display `(space . (:width (,page-width) :height (,overlay-heigth))))
           ;; (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
           (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
-          (overlay-put o 'size page-size)
+          (overlay-put o 'size overlay-size)
           (setq n (1+ n))))
       ;; (redisplay t) ;NOTE does not help for display issue
       (setf (doc-scroll-columns) columns))
     ;; (sit-for 0.01) ;NOTE does not help for display issue
+    (doc-scroll-goto-pos (or (doc-scroll-current-page) 1)
+                         (or (image-mode-window-get 'fscroll) 0))
     (doc-scroll-update)))
 ;; (run-with-timer 0.01 nil #'doc-scroll-update)))
 
@@ -492,7 +521,10 @@ Folder contains thumb and page images."
         ;; NOTE, when implementing some 'restore' functionality, then jump to
         ;; the correct 'point' here (the overlays, i.e. `doc-scroll-page-pos', are
         ;; not yet available).
-        (goto-char (point-min)))
+        ;; (setf (doc-scroll-current-page) (doc-scroll-))
+        (goto-char (point-min))
+        ;; (goto-char (doc-scroll-page-pos (or (doc-scroll-current-page) 1)))
+        )
 
     ;; ;; required to make `pdf-view-redisplay-some-windows' call `pdf-view-redisplay'
     ;; (when-let (fun doc-scroll-set-redisplay-flag-function)
@@ -506,10 +538,11 @@ Folder contains thumb and page images."
       (image-mode-window-put 'overlays ols winprops)
 
 
-      ;; cursor should be on overlay for `doc-scroll-current-page'
-      ;; (setf (doc-scroll-current-page (car winprops))
-      ;;       (or (doc-scroll-current-page (car winprops)) 1))))))
-      (goto-char (point-min)))))
+      ;; cursor should be on overlay for `doc-scroll-page-at-point'
+      ;; (setf (doc-scroll-page-at-point (car winprops))
+      ;;       (or (doc-scroll-page-at-point (car winprops)) 1))))))
+      ;; (goto-char (doc-scroll-page-pos (or (doc-scroll-current-page) 1)))
+      )))
 
 (defun test (page)
   (goto-char (doc-scroll-page-pos page))
@@ -571,12 +604,12 @@ columns"
                          when (eq (% doc-scroll-line-length f) 0)
                          collect f)
                 ",")))
-  (let ((current-page (doc-scroll-current-page))
+  (let ((current-page (doc-scroll-page-at-point))
         ;; (doc-scroll-overlay-sizes (doc-scroll-desired-page-sizes
         ;;                    doc-scroll-internal-page-sizes nil columns
         ;;                    doc-scroll-horizontal-margin doc-scroll-vertical-margin))
         (doc-scroll-overlay-sizes (doc-scroll-desired-overlay-sizes
-                                doc-scroll-internal-page-sizes columns))
+                                   doc-scroll-internal-page-sizes columns))
         (pos 1)
         (i 0))
     (dolist (o (doc-scroll-overlays))
@@ -644,7 +677,7 @@ columns"
 
 (defun doc-scroll-undisplay-page (page)
   ;; (print "of hier")
-  (pcase-let* ((`(,w . ,h) (doc-scroll-page-size page)))
+  (pcase-let* ((`(,w . ,h) (doc-scroll-overlay-size page)))
     (overlay-put (doc-scroll-overlay page) 'data nil) ;; TODO improve/implement
     ;; caching algorithm
     (overlay-put (doc-scroll-overlay page)
@@ -655,7 +688,7 @@ columns"
 ;; NOTE pdf-tools style async (see next for more logical async version)
 ;; (defun doc-scroll-display-pages-async (pages &optional force)
 ;;   ;; (print "RUNNING" #'external-debugging-output)
-;;   (pcase-let* ((size (doc-scroll-page-size (car pages)))
+;;   (pcase-let* ((size (doc-scroll-overlay-size (car pages)))
 ;;                (`(,w . ,h) size)
 ;;                ;; (scale (/ (float w) (car (nth (1- (car pages)) doc-scroll-internal-page-sizes))))
 ;;                ;; (svg (svg-create w h))
@@ -696,7 +729,7 @@ columns"
 ;; (defun doc-scroll-display-pages (pages &optional force)
 ;;   ;; (print "RUNNING" #'external-debugging-output)
 ;;   (dolist (p pages)
-;;     (let* ((size (doc-scroll-page-size p))
+;;     (let* ((size (doc-scroll-overlay-size p))
 ;;            (width (car size))
 ;;                ;; (scale (/ (float w) (car (nth (1- p) doc-scroll-internal-page-sizes))))
 ;;                ;; (svg (svg-create w h))
@@ -748,17 +781,17 @@ columns"
     ;; (let ((data (pymupdf-epc-page-svg-data page t)))
     (let ((data (pcase major-mode
                   ('doc-scroll-epdf-mode (funcall doc-scroll-image-data-function page doc-scroll-overlay-width)))))
-           ;; (base64-decode-string
-                 ;; (pymupdf-epc-page-base64-image-data page
-                                                     ;; doc-scroll-overlay-width))))
+      ;; (base64-decode-string
+      ;; (pymupdf-epc-page-base64-image-data page
+      ;; doc-scroll-overlay-width))))
                                         ; (or (doc-scroll-overlay-get page 'data))
-    ;;  (when (eq major-mode 'doc-scroll-pymupdf-mode)
-    ;;    (funcall doc-scroll-image-data-function page width))))
+      ;;  (when (eq major-mode 'doc-scroll-pymupdf-mode)
+      ;;    (funcall doc-scroll-image-data-function page width))))
       ;; (doc-scroll-display-page page nil)))
       (doc-scroll-display-page page data))))
 
 (defun doc-scroll-display-page (page &optional data)
-  (let* ((overlay-size (doc-scroll-page-size page))
+  (let* ((overlay-size (doc-scroll-overlay-size page))
          (internal-size (nth (1- page) doc-scroll-internal-page-sizes))
 
          ;; image-width should be doc-scroll-overlay-width, as we `internally
@@ -863,7 +896,7 @@ columns"
 
 (defun doc-scroll-goto-page-start ()
   (interactive)
-  (image-set-window-vscroll 0))
+  (doc-scroll-set-window-fscroll 0))
 
 ;; NOTE code based on (taken from) `pdf-view-goto-page'.
 (defun doc-scroll-goto-page (page &optional window)
@@ -886,7 +919,7 @@ columns"
     (when (window-live-p window)
       (select-window window 'norecord))
     (let ((changing-p
-           (not (eq page (doc-scroll-current-page window)))))
+           (not (eq page (doc-scroll-page-at-point window)))))
       ;; (when changing-p
       ;;   (run-hooks 'doc-scroll-before-change-page-hook)
       ;;   (run-hooks 'doc-scroll-change-page-hook))
@@ -906,9 +939,13 @@ columns"
 (defun doc-scroll-goto-pos (page vscroll &optional window)
   "Go to PAGE in document."
   ;; first adjusting the scroll and then go to page displays smoothly
-  (image-set-window-vscroll vscroll)
+  (doc-scroll-set-window-fscroll vscroll)
   (doc-scroll-goto-page page window))
 
+(defun doc-scroll-update-page-winprop ()
+  (image-mode-window-put 'page (doc-scroll-page-at-point)))
+
+(add-hook 'doc-scroll-after-change-page-hook #'doc-scroll-update-page-winprop)
 
 (defun doc-scroll-scroll-forward (&optional screen)
   (interactive)
@@ -917,16 +954,16 @@ columns"
                                                  doc-scroll-step-size))))
     (cond ((> new-vscroll (cdr (doc-scroll-current-size)))
            (forward-line)
-           (image-set-window-vscroll 0) ;or set to vertical margin
+           (doc-scroll-set-window-fscroll 0) ;or set to vertical margin
            (doc-scroll-update)
-           (image-mode-window-put 'position (point)))
+           (run-hooks 'doc-scroll-after-change-page-hook))
           ((> (+ new-vscroll (window-text-height nil t)) (cdr (doc-scroll-current-size)))
-           (cond ((and (= (doc-scroll-columns) 1) (= (doc-scroll-current-page) doc-scroll-last-page))
+           (cond ((and (= (doc-scroll-columns) 1) (= (doc-scroll-page-at-point) doc-scroll-last-page))
                   (message "End of buffer"))
                  (t
-                  (image-set-window-vscroll new-vscroll)
+                  (doc-scroll-set-window-fscroll new-vscroll)
                   (doc-scroll-update))))
-          (t (image-set-window-vscroll new-vscroll)))))
+          (t (doc-scroll-set-window-fscroll new-vscroll)))))
 
 (defun doc-scroll-scroll-backward (&optional screen)
   (interactive)
@@ -934,16 +971,18 @@ columns"
                                                    (window-text-height nil t)
                                                  doc-scroll-step-size))))
     (cond ((< new-vscroll 0)
-           (if (<= (doc-scroll-current-page) (doc-scroll-columns))
-               (image-set-window-vscroll 0) ;or set to vertical margin
-             (message "Beginning of buffer")
-             (forward-line -1)
-             (image-set-window-vscroll (cdr (doc-scroll-current-size)))
-             (doc-scroll-update)))
+           (cond ((<= (doc-scroll-page-at-point) (doc-scroll-columns))
+                  (doc-scroll-set-window-fscroll 0) ;or set to vertical margin
+                  (message "Beginning of buffer"))
+                 (t
+                  (forward-line -1)
+                  (doc-scroll-set-window-fscroll (cdr (doc-scroll-current-size)))
+                  (doc-scroll-update)
+                  (run-hooks 'doc-scroll-after-change-page-hook))))
           ((< new-vscroll (- (window-text-height nil t) (cdr (doc-scroll-current-size))))
-           (image-set-window-vscroll new-vscroll)
+           (doc-scroll-set-window-fscroll new-vscroll)
            (doc-scroll-update))
-          (t (image-set-window-vscroll new-vscroll)))))
+          (t (doc-scroll-set-window-fscroll new-vscroll)))))
 
 (defun doc-scroll-scroll-screen-forward ()
   (interactive)
@@ -1097,16 +1136,16 @@ The number of COLUMNS can be set with a numeric prefix argument."
 
 (defun doc-scroll-coords-to-svg (page coords)
   (let ((internal-size (doc-scroll-internal-size page))
-        (size (doc-scroll-page-size page)))
+        (size (doc-scroll-overlay-size page)))
     (doc-scroll-coords-convert coords internal-size
-                          (pcase major-mode
-                            ('doc-scroll-djvu-mode 'djvu)
-                            ('doc-scroll-mupdf-mode 'pdf))
-                          size 'svg)))
+                               (pcase major-mode
+                                 ('doc-scroll-djvu-mode 'djvu)
+                                 ('doc-scroll-mupdf-mode 'pdf))
+                               size 'svg)))
 
 (defun doc-scroll-coords-point-scale (page coords)
   (pcase-let ((`(,iw . ,ih) (doc-scroll-internal-size page))
-              (`(,w . ,h) (doc-scroll-page-size page)))
+              (`(,w . ,h) (doc-scroll-overlay-size page)))
     (cons (* (/ (float iw) w) (car coords))
           (* (/ (float ih) h) (cdr coords)))))
 
@@ -1168,11 +1207,11 @@ The number of COLUMNS can be set with a numeric prefix argument."
       (apply #'svg-rectangle
              svg-matches
              (append (doc-scroll-coords-convert (cl-subseq m 0 4)
-                                           from-size
-                                           (pcase major-mode
-                                             ('doc-scroll-djvu-mode 'djvu)
-                                             (_ 'pdf))
-                                           to-size 'svg)
+                                                from-size
+                                                (pcase major-mode
+                                                  ('doc-scroll-djvu-mode 'djvu)
+                                                  (_ 'pdf))
+                                                to-size 'svg)
                      (list :fill (or (plist-get m :fill) "yellow")
                            :opacity (or (plist-get m :opacity) 0.3)))))
     svg-matches))
@@ -1183,11 +1222,11 @@ The number of COLUMNS can be set with a numeric prefix argument."
       (apply #'svg-rectangle
              svg-regions
              (append (doc-scroll-coords-convert r
-                                           from-size
-                                           (pcase major-mode
-                                             ('doc-scroll-djvu-mode 'djvu)
-                                             (_ 'pdf))
-                                           to-size 'svg)
+                                                from-size
+                                                (pcase major-mode
+                                                  ('doc-scroll-djvu-mode 'djvu)
+                                                  (_ 'pdf))
+                                                to-size 'svg)
                      (list :fill (or (plist-get r :fill) "gray")
                            :opacity (or (plist-get r :opacity) 0.3)))))
     svg-regions))
