@@ -1,18 +1,105 @@
-* Notes
+#+TITLE: Doc Tools for Emacs
 
-#+begin_src emacs-lisp
-  (cl-loop for f from 1 to 60
-           when (eq (% 120 f) 0)
-           collect f)
-#+end_src
+* Introduction
+This package provides a versatile Emacs document viewer/editor, combined with a
+set of tools for editing documents. Although the package has been written from
+scratch, it draws inspiration from other current document viewer/editor packages
+like doc-view, pdf-tools, and djvu. However, the goal of this package is to be,
+mostly, an improvement on the other packages (see [[Improvements over other
+packages]] below), while, similar to doc-view, integrating all document
+viewing/editing into a single coherent, easier to understand and maintain,
+library.
 
-#+RESULTS:
-| 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 15 | 20 | 24 | 30 | 40 | 60 |
+This packages mainly targets the GNU/linux platform, but it can probably made to
+work perfectly fine on other (non-)free platforms also.
 
-* Multiple Windows
-A buffer's text format is unique, so (without using overlays), the
-formattings of a single buffer displayed in different windows are
-identical. However, overlays can be made made to 'show only in a
-single window' by setting the window as its window property.
+* Donate
+If this package helps you with your paid (or optionally your unpaid) work, then
+please help me with my work also. Creating this package takes a huge amount of
+time (for coding, but especially for investigating). However, I am in a
+situation that I have very little spare time, and even less money. Despite the
+deep wisdom in the saying: '[[https://www.quora.com/What-is-an-explanation-of-the-sentence-Let-not-the-fruits-of-action-be-your-motive-nor-let-your-attachment-be-to-inaction][Let not the fruits of action be your motive]]', we do
+need some fruit to stay alive. Therefore, I would be very happy either with your
+contributions to the code, or otherwise, if you can afford it, with your
+financial support. Without donations, I am simply unable to work on the package,
+while small donations let me add nice features (so you could see your donation
+as a donation to the Emacs and the community).
 
-Now windows 
+* Why this package?
+Although having columns might not be a huge improvement, I find Emacs and its
+users valuable enough to add this feature to its document reader. Additionally,
+although it might not be essential for many users, I guess for some users it
+would be great to have support for line annotations in Emacs.
+
+So why not just extending pdf-tools or doc-view.
+
+I have first tried to implement this improved 'display engine' (if I am allowed
+to use that fancy term) into PDF-tools. However, because of PDF-tools being
+explicitly designed for having a single page per view, this was taking too much
+time (it was quite a lot more difficult than implementing support for
+=image-roll=, which was already hard enough). Of course, I would have likes to have
+the 'display-engine' available for reading djvu also.
+
+So then, why not extend doc-view? Doc-view also is not designed to support
+continuous scrolling. Additionally, for some reason, scrolling in doc-view is
+very slow/laggy (I have tried to use it with image-roll before, but that was an
+annoying experience). It also does not support isearch nor annotations (both
+requiring the possibility of highlighting).
+
+So in the end it is just much easier to start from scratch, taking into account
+all new features while designing the package and optionally port features from
+the other packages (possibly also from djvu.el) into this package.
+
+** Improvements over other packages
+*** pdf-tools
+Currently, the most powerful (depending on its definition) document viewer for
+Emacs is [[https://github.com/vedang/pdf-tools][pdf-tools]]. This package improves on it in a few ways:
+
+- support multiple backends (like djvu, pymupdf)
+- continuous scrolling, and supports viewing and scrolling 2 or more pages
+  side-by-side where the view can be changed by simply using a numeric prefix
+- more annotation features, like line, arrow, and free text annotations
+  (although currently only some type of annotations implemented, but adding
+  support for more types is relatively easy).
+- a togglable thumbs side bar where the number of columns can easily be set
+  using a numeric prefix
+- [[https://elpa.gnu.org/packages/swiper.html][swiper]]/[[https://github.com/minad/consult/issues/625][consult-line]] support, where individual candidates (i.e. the 'searched
+  regions') can stretch over multiple lines or even full pages. (currently only
+  implemented for djvu)
+- support for [[https://mupdf.com/][all document formats that are supported by mupdf (e.g. epub)]]
+  (requires the [[https://mupdf.com/docs/mutool.html][mupdf]] backend, which is the default)
+- much simpler code and therefore much more hackable than pdf-tools
+- modular design so that other packages can use 'individual' packages without
+  installing all of doc-tools.
+- available via ELPA
+
+**** image-roll
+The image-roll package adds support for continuous scrolling to PDF-tools. This
+package improves on image-roll in various ways
+- page side-by-side reading (see parent section)
+- thumbs side-bar
+
+/more technically/
+- greatly simplifies the code by using =overlays-in= to determine the displayed
+  overlays
+- replace macro's with generalized variables (i.e. prevent void function errors)
+
+*** doc-view
+- no waiting for all pages to be converted (on each 'zoom adjustment')
+- isearch support
+- imenu support
+- fast scrolling
+- all points mentioned in previous section
+
+*** djvu.el
+- display annotations support
+- annotate directly in 'image-mode' using the mouse
+- all points mentioned in previous sections
+
+* Design choices
+** Page data
+- Currently the package uses the simplest approach for caching the images, all
+  page images simply get written to the =/tmp= directory. Because the memory
+  required for the images scales exponentially with their size, the package
+  limits the width of the images by default (see [[help:doc-scroll-overlay-width][doc-scroll-overlay-width]]
+  variable). Instead of recreating all pages after adjusting the 'zoom'
