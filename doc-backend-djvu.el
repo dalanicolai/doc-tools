@@ -17,13 +17,15 @@
               doc-scroll-image-type 'tiff
               doc-scroll-image-data-function #'doc-djvu-decode-page
 
-              imenu-create-index-function #'doc-scroll-doc-djvu--imenu-create-index
+              imenu-create-index-function #'doc-backend-djvu--imenu-create-index
 
               ;; TODO because of an Emacs bug, so that Emacs always passes a
               ;; marker, jumping for nested functions don't work with normal
               ;; `imenu'. However, it works with `imenu-list'.
               imenu-default-goto-function (lambda (_name position &rest _rest)
-                                            (doc-scroll-goto-page position))
+                                            (doc-scroll-goto-page (if (markerp position)
+                                                                      (marker-position position)
+                                                                    position)))
               doc-scroll-info-function #'doc-djvu-info))
 
 (add-to-list 'auto-mode-alist '("\\.djvu\\'" . doc-scroll-djvu-mode))
@@ -61,7 +63,7 @@
                       (string-to-number page)))))
           (or (alist-get 'bookmarks data) (doc-scroll-debug "%s" data))))
 
-(defun doc-scroll-djvu--imenu-create-index ()
+(defun doc-backend-djvu--imenu-create-index ()
   (create-imenu (doc-djvu-bookmarks)))
 
 ;;; doc-scroll-swiper
