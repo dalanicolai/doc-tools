@@ -393,7 +393,7 @@ Setf-able function."
     "c" 'doc-scroll-set-columns
     "t" 'doc-scroll-thumbs
     "T" 'doc-scroll-page-text
-    "/" 'doc-scroll-search-next
+    "/" 'doc-scroll-search
     "n" 'doc-scroll-search-next
     "i" 'doc-scroll-info
     "y" 'doc-scroll-kill-new
@@ -1248,6 +1248,8 @@ The number of COLUMNS can be set with a numeric prefix argument."
 
 (defun doc-scroll-search (word)
   (interactive "sEnter search pattern: ")
+  (unless doc-scroll-contents
+    (setq doc-scroll-contents (funcall doc-scroll-contents-function)))
   (let ((results (funcall (pcase major-mode
                             ('doc-scroll-djvu-mode
                              #'doc-djvu-search-word)

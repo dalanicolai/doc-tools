@@ -12,6 +12,7 @@
   (setq-local doc-scroll-internal-page-sizes (doc-djvu-page-sizes)
               doc-scroll-last-page (length doc-scroll-internal-page-sizes)
               ;; doc-scroll-contents (doc-djvu-parse-raw-contents)
+              doc-scroll-contents-function #'doc-djvu-parse-raw-contents
               doc-scroll-structured-contents (doc-djvu-structured-text 'char)
 
               doc-scroll-image-type 'tiff
@@ -30,7 +31,7 @@
 
 (add-to-list 'auto-mode-alist '("\\.djvu\\'" . doc-scroll-djvu-mode))
 
-(defun doc-scroll-djvu-save ()
+(defun doc-backend-djvu-save ()
   (interactive)
   ;; (remove-overlays)
   ;; (setq image-mode-winprops-alist nil)
@@ -78,6 +79,7 @@
 ;;       (mapcar #'recur
 ;;               (nthcdr 5 text)))))
 
+;; experimental function with functionality similar to pdf.tocgen
 (defun doc-djvu-get-toc (min-line-height max-line-height)
   (interactive (list (read-number "Enter minimum line height: ")
                      (read-number "Enter maximum line height: ")))
@@ -108,7 +110,7 @@
 ;;     (setq i (1+ i)))
 ;;   i)
 
-(defun doc-scroll-doc-djvu-get-regions (page-contents start-point end-point)
+(defun doc-scroll-djvu-get-regions (page-contents start-point end-point)
   ;; first we filter out the element in the correct column, we do not support
   ;; annotations that stretch over multiple columns.
   (doc-scroll-debug "%s %s" start-point end-point)
