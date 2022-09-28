@@ -137,6 +137,28 @@ track of the state of the document.")
 
 (defvar-local doc-scroll-info-function nil)
 
+(defun doc-scroll-set-pdf-mode (mode)
+  (interactive (list
+                (intern
+                 (completing-read "Select mode: "
+                                  '(pdf-view-mode
+                                    doc-scroll-mupdf-mode
+                                    doc-view-mode-maybe)))))
+
+  ;; remove pdf-view-mode from magic-mode alist
+  (if-let (e (rassoc 'pdf-view-mode magic-mode-alist))
+      (setq magic-mode-alist (remove e magic-mode-alist)))
+
+  (push (cons "\\.pdf\\'" mode) auto-mode-alist))
+
+(defun doc-scroll-set-djvu-mode (mode)
+  (interactive (list
+                (intern
+                 (completing-read "Select mode: "
+                                  '(doc-scroll-djvu-mode
+                                    djvu-init-mode
+                                    doc-view-mode-maybe)))))
+  (push (cons "\\.djvu\\'" mode) auto-mode-alist))
 
 ;;; window local value utils
 (defun doc-scroll-window-width (&optional winprops)
