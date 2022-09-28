@@ -384,7 +384,7 @@ Setf-able function."
              "\n"))
 
 (defun doc-scroll-active-regions (regions)
-  (mapcar (lambda (r) (print (if (nthcdr 4 r) (butlast r) r))) regions))
+  (mapcar (lambda (r) (if (nthcdr 4 r) (butlast r) r)) regions))
 
 (defun doc-scroll-page-text (&optional arg)
   (interactive "P")
@@ -498,10 +498,15 @@ Setf-able function."
           ;; NOTE we would like to store data in the overlay, but the following
           ;; functions seems not to remove that data in time
           ;; (overlay-put o 'data nil)
-
+          (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
+          (when (or (not (doc-scroll-columns)) (= (doc-scroll-columns) 1))
+            (overlay-put o 'before-string
+                         (when (> (window-pixel-width) (car overlay-size))
+                           (propertize " " 'display
+                                       `(space :align-to
+                                               (,(floor (/ (- (window-pixel-width) (car overlay-size)) 2))))))))
           (overlay-put o 'display `(space . (:width (,page-width) :height (,overlay-heigth))))
           ;; (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
-          (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
           (overlay-put o 'size overlay-size)
           (setq n (1+ n))))
       ;; (redisplay t) ;NOTE does not help for display issue
@@ -621,6 +626,9 @@ Setf-able function."
   (doc-scroll-redisplay t))
 
 
+;; Instead of refilling the buffer, we simply shift the overlays. In this way,
+;; the same buffer can be displayed with a different number of columns in
+;; different windows
 (defun doc-scroll-set-columns (columns)
   (interactive "p")
   (when (/= (% doc-scroll-line-length columns) 0)
@@ -1290,8 +1298,8 @@ The number of COLUMNS can be set with a numeric prefix argument."
 
 (defun doc-scroll-search (word)
   (interactive "sEnter search pattern: ")
-  (unless doc-scroll-contents
-    (setq doc-scroll-contents (funcall doc-scroll-contents-function)))
+  ;; (unless doc-scroll-contents
+  ;;   (setq doc-scroll-contents (funcall doc-scroll-contents-function)))
   (let ((results (funcall (pcase major-mode
                             ('doc-scroll-djvu-mode
                              #'doc-djvu-search-word)
