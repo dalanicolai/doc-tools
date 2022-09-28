@@ -889,7 +889,8 @@ columns"
     (setq image (apply (if doc-scroll-svg-embed
                            (apply-partially #'svg-image svg)
                          (apply-partially #'create-image data 'png t))
-                       (list :width (- (car overlay-size) (* 2 doc-scroll-horizontal-margin))
+                       (list :page page ;; used for mouse event page info
+                             :width (- (car overlay-size) (* 2 doc-scroll-horizontal-margin))
                              :margin (cons doc-scroll-horizontal-margin doc-scroll-vertical-margin)
                              :map
                              (append annot-map
@@ -1141,6 +1142,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
       ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
       ('svg (list x0 y0 (+ x0 dx) (+ y0 dy)))
       ('djvu-annot (list x0 (- 1 (+ y0 dy)) (+ x0 dx) (- 1 y0)))
+      ('djvu-line (list x0 (- 1 y0) x1 (- 1 y1)))
       (_ ratios))))
 
 (defun doc-scroll-coords-denormalize (coords size &optional type)
@@ -1221,12 +1223,24 @@ The number of COLUMNS can be set with a numeric prefix argument."
   (let ((svg-annots (svg-group 'annotations)))
     (dolist (a annots)
       (let* ((area (nth 3 a))
+             (type (car area))
              (coords (cdr area)))
-        (apply #'svg-rectangle
+        (apply (pcase type
+                 ('rect #'svg-rectangle)
+                 ('line #'svg-line))
                svg-annots
-               (append (doc-scroll-coords-convert coords from-size 'djvu-annot to-size 'svg)
-                       (list :fill (car (alist-get 'hilite (nthcdr 4 a)))
-                             :opacity 0.3)))))
+               (append (doc-scroll-coords-convert coords from-size (pcase type
+                                                                     ('rect 'djvu-annot)
+                                                                     ('line 'djvu-line))
+                                                  to-size (when (eq type 'rect) 'svg))
+                       (list :fill (car (alist-get (pcase type
+                                                     ('rect 'hilite)
+                                                     ('line 'lineclr))
+                                                   (nthcdr 4 a)))
+                             :stroke-color "black"
+                             :opacity (pcase type
+                                        ('rect 0.3)
+                                        ('line 0.8)))))))
     svg-annots))
 
 (defun doc-scroll-matches-to-svg (matches from-size to-size)
