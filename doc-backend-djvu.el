@@ -11,9 +11,9 @@
 
   (setq-local doc-scroll-internal-page-sizes (doc-djvu-page-sizes)
               doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              ;; doc-scroll-contents (doc-djvu-parse-raw-contents)
-              doc-scroll-contents-function #'doc-djvu-parse-raw-contents
-              doc-scroll-structured-contents (doc-djvu-structured-text 'char)
+              doc-scroll-contents (doc-djvu-parse-raw-contents)
+              ;; doc-scroll-contents-function #'doc-djvu-parse-raw-contents
+              ;; doc-scroll-structured-contents (doc-djvu-structured-text 'char)
 
               doc-scroll-image-type 'tiff
               doc-scroll-image-data-function #'doc-djvu-decode-page
@@ -23,6 +23,7 @@
               ;; TODO because of an Emacs bug, so that Emacs always passes a
               ;; marker, jumping for nested functions don't work with normal
               ;; `imenu'. However, it works with `imenu-list'.
+
               imenu-default-goto-function (lambda (_name position &rest _rest)
                                             (doc-scroll-goto-page (if (markerp position)
                                                                       (marker-position position)

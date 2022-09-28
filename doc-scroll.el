@@ -304,13 +304,19 @@ Setf-able function."
   (interactive "@e")
   (doc-scroll-select-region event t))
 
+(defun doc-scroll-structured-text (&optional page)
+  (if page
+      (car (alist-get 'text (alist-get page doc-scroll-contents)))
+    (mapcar (lambda (p) (car (alist-get 'text p))) doc-scroll-contents)))
+
 (defun doc-scroll-select-region (event &optional free)
   "Draw objects interactively via a mouse drag EVENT. "
   (interactive "@e")
   (let* ((start (event-start event))
-         (page (nth 1 start))
+         ;; (page (print (posn-area start)))
+         (page (image-property (posn-image start) :page))
          (start-point (doc-scroll-coords-point-scale page (posn-object-x-y start)))
-         (text (nth (1- page) doc-scroll-structured-contents))
+         (text (doc-scroll-structured-text page))
          first-element
          result)
     ;; NOTE we either must pass page to the 'doc-scroll-djvu-get-regions' and pdf
