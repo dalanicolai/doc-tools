@@ -1,7 +1,7 @@
 ;; -*- lexical-binding: t; -*-
 
-(load "/home/dalanicolai/git/doc-tools/doc-scroll.el")
 (load "/home/dalanicolai/git/doc-tools-djvu/doc-djvu.el")
+(load (concat (file-name-directory (or load-file-name buffer-file-name)) "doc-scroll.el"))
 
 (defvar-local doc-scroll-current-rectangles nil)
 

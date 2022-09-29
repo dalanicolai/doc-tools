@@ -1,7 +1,8 @@
 #+TITLE: Doc Tools for Emacs
 
 * Introduction
-This package provides a versatile Emacs document viewer/editor, combined with a
+This package provides a (well working and very usable, but only partially
+implemented, demo of a) versatile Emacs document viewer/editor, combined with a
 set of tools for editing documents. Although the package has been written from
 scratch, it draws inspiration from other current document viewer/editor packages
 like doc-view, pdf-tools, and djvu. However, the goal of this package is to be,
@@ -13,17 +14,28 @@ library.
 This packages mainly targets the GNU/linux platform, but it can probably made to
 work perfectly fine on other (non-)free platforms also.
 
+** Important
+Currently, this package caches all page images somewhere in the =/tmp= directory.
+Therefore (although it is a nice default anyway), the images are set to a
+limited size (memory use increases exponentially with image size). Most/all
+computers probably have enough memory space (about 50-300 MB per book), however
+you can check the memory size of the books pages folder using
+=doc-scroll-cache-folder-size= (the recommended way is to call it via
+=doc-scroll-info= by pressing =i= from the book buffer).
+
 * Donate
-If this package helps you with your paid (or optionally your unpaid) work, then
-please help me with my work also. Creating this package takes a huge amount of
-time (for coding, but especially for investigating). However, I am in a
-situation that I have very little spare time, and even less money. Despite the
-deep wisdom in the saying: '[[https://www.quora.com/What-is-an-explanation-of-the-sentence-Let-not-the-fruits-of-action-be-your-motive-nor-let-your-attachment-be-to-inaction][Let not the fruits of action be your motive]]', we do
-need some fruit to stay alive. Therefore, I would be very happy either with your
-contributions to the code, or otherwise, if you can afford it, with your
-financial support. Without donations, I am simply unable to work on the package,
-while small donations let me add nice features (so you could see your donation
-as a donation to the Emacs and the community).
+If this package helps you with your paid (or optionally your unpaid) work (or if
+you just like to support/popularize Emacs by supporting to make it more
+attractive and more useful for more people), then please help me with my work
+also. Creating this package takes a huge amount of time (for coding, but
+especially for investigating). However, I am in a situation that I have very
+little spare time, and even less money. Despite the deep wisdom in the saying:
+'[[https://www.quora.com/What-is-an-explanation-of-the-sentence-Let-not-the-fruits-of-action-be-your-motive-nor-let-your-attachment-be-to-inaction][Let not the fruits of action be your motive]]', we do need some fruit to stay
+alive. Therefore, I would be very happy either with your contributions to the
+code, or otherwise, if you can afford it, with your financial support. Without
+donations, I am simply unable to work on the package, while small donations let
+me add nice features (so you could see your donation as a donation to Emacs and
+the community).
 
 * Why this package?
 Although having columns might not be a huge improvement, I find Emacs and its
@@ -37,14 +49,21 @@ I have first tried to implement this improved 'display engine' (if I am allowed
 to use that fancy term) into PDF-tools. However, because of PDF-tools being
 explicitly designed for having a single page per view, this was taking too much
 time (it was quite a lot more difficult than implementing support for
-=image-roll=, which was already hard enough). Of course, I would have likes to have
-the 'display-engine' available for reading djvu also.
+=image-roll=, which was already hard enough). Of course, I would like to make the
+'display-engine' available for reading djvu also.
 
 So then, why not extend doc-view? Doc-view also is not designed to support
 continuous scrolling. Additionally, for some reason, scrolling in doc-view is
 very slow/laggy (I have tried to use it with image-roll before, but that was an
 annoying experience). It also does not support isearch nor annotations (both
-requiring the possibility of highlighting).
+requiring the possibility of highlighting). Additionally, I prefer to have a
+more modular design, i.e. having the display engine as a separate package, for
+which simply backends can be added. These backends typically make use of
+document inspection/editing libraries, which can again be implemented in
+different packages (see [[https://github.com/dalanicolai/doc-tools-djvu][doc-tools-djvu]], [[https://github.com/dalanicolai/doc-tools-poppler][doc-tools-poppler]], [[https://github.com/dalanicolai/doc-tools-mupdf][doc-tools-mupdf]],
+[[https://github.com/dalanicolai/doc-tools-pymupdf][doc-tools-pymupdf]], doc-tools-epdf (to be added)). These are just document
+manipulation libraries, that could be used by other packages also (this modular
+organization may change, but currently this is how it is organized).
 
 So in the end it is just much easier to start from scratch, taking into account
 all new features while designing the package and optionally port features from
@@ -96,10 +115,50 @@ package improves on image-roll in various ways
 - annotate directly in 'image-mode' using the mouse
 - all points mentioned in previous sections
 
-* Design choices
+* Design choices 
 ** Page data
-- Currently the package uses the simplest approach for caching the images, all
-  page images simply get written to the =/tmp= directory. Because the memory
-  required for the images scales exponentially with their size, the package
-  limits the width of the images by default (see [[help:doc-scroll-overlay-width][doc-scroll-overlay-width]]
-  variable). Instead of recreating all pages after adjusting the 'zoom'
+- *Caching* Currently the package uses the simplest approach for caching the
+  images, all page images simply get written to the =/tmp= directory. Because the
+  memory required for the images scales exponentially with their size, the
+  package limits the width of the images by default (see
+  [[help:doc-scroll-overlay-width][doc-scroll-overlay-width]] variable). Instead of recreating all pages after
+  adjusting the 'zoom'
+- *Columns* Displaying columns could have been implemented by fully refilling the
+  buffer, and 'redistribute' the overly placeholders (e.g. using single spaces).
+  However, using such implementation would not allow for showing different
+  numbers of columns in different windows. This package implements the columns
+  by using placeholders with a length that is a multiple of the possible number
+  of columns (e.g. 1 x 2 x 3 x 4 x 5 = 120, i.e. the default value). In this
+  way, the overlays can be moved to obtain a different number of columns (1
+  column uses 120 characters per overlay, 2 columns 60 etc.)
+
+* Implemented features
+** djvu
+- [X] imenu (provides TOC via [[https://melpa.org/#/imenu-list][imenu-list]])
+- [X] select/yank text
+- [X] search forward
+- [X] add highlight annotation
+- [ ] save file (partially implemented, i.e. the file gets saved, but the buffer
+  does not yet get restored so that the file has to be killed and found again).
+
+** pdf
+- [X] search forward
+
+* Installation
+As this package is a work in development, and has not been published on any
+Emacs archive, the package has to be installed manually. For that:
+
+First clone this package to some directory.
+
+** djvu
+Make sure that you have djvulibre installed (e.g. for Fedora use =sudo dnf
+install djvulibre=). Then download the doc-tools-djvu package from [[https://github.com/dalanicolai/doc-tools-djvu][here]]. Finally,
+open [[file:/home/dalanicolai/git/doc-tools/doc-backend-djvu.el][doc-backend-djvu.el]], adjust the paths on top of the file and evaluate the
+buffer/load the file.
+
+** mupdf
+Make sure that you have mupdf and poppler-urils installed (e.g. for Fedora use
+=sudo dnf install mupdf poppler-utils=). Then download the doc-tools-mupdf package
+from [[https://github.com/dalanicolai/doc-tools-mupdf][here]]. Finally, open [[file:/home/dalanicolai/git/doc-tools/doc-backend-mupdf.el][doc-backend-mupdf.el]], adjust the paths on top of the
+file and evaluate the buffer/load the file.
+

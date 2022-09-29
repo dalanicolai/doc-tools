@@ -1,8 +1,8 @@
 ;; -*- lexical-binding: t; -*-
 
-(load-file "/home/dalanicolai/git/doc-tools/doc-scroll.el")
 (load-file "/home/dalanicolai/git/doc-tools-mupdf/doc-mupdf.el")
 (load-file "/home/dalanicolai/git/emacs-poppler/poppler.el")
+(load (concat (file-name-directory (or load-file-name buffer-file-name)) "doc-scroll.el"))
 
 (define-derived-mode doc-scroll-mupdf-mode special-mode "Doc-MuPDF"
   (doc-mupdf-create-pages doc-scroll-overlay-width)
@@ -10,7 +10,7 @@
 
   (setq-local doc-scroll-internal-page-sizes (doc-mupdf-page-sizes)
               doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              ;; doc-scroll-structured-contents (poppler-structured-contents nil nil t)
+              doc-scroll-structured-contents (poppler-structured-contents nil nil t)
 
                ;; doc-scroll-display-page-function #'doc-scroll-djvu-display-page
                doc-scroll-image-type 'png
@@ -25,6 +25,9 @@
                                                                   (marker-position position)
                                                                 position)))
                doc-scroll-info-function #'doc-mupdf-info))
+
+(setq magic-mode-alist (remove '("%PDF" . pdf-view-mode) magic-mode-alist))
+(add-to-list 'auto-mode-alist '("\\.pdf\\'" . doc-scroll-mupdf-mode))
 
 ;; (setq doc-scroll-mupdf-mode-map doc-scroll-mode-map)
 (defun doc-scroll-mupdf--imenu-create-index ()
@@ -51,4 +54,3 @@
       (goto-char (point-min))
       (setq test (read (current-buffer))))))
 
-  (add-to-list 'auto-mode-alist '("\\.pdf\\'" . doc-scroll-mupdf-mode))
