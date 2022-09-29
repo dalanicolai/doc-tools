@@ -162,3 +162,8 @@ Make sure that you have mupdf and poppler-urils installed (e.g. for Fedora use
 from [[https://github.com/dalanicolai/doc-tools-mupdf][here]]. Finally, open [[file:/home/dalanicolai/git/doc-tools/doc-backend-mupdf.el][doc-backend-mupdf.el]], adjust the paths on top of the
 file and evaluate the buffer/load the file.
 
+* Usage
+Use =n c= to switch to display pages side-by-side (where =n= stands for a number
+that also determines the number of columns). Use =n t= to show the thumbs side-bar
+(=n= works same as with =c=). When showing more then about 5 columns, then using the
+=t= options is preferred (works more smoothly).
