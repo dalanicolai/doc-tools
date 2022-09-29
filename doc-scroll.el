@@ -267,13 +267,13 @@ Setf-able function."
                                        (cdr (doc-scroll-overlay-size page))
                                      (doc-scroll-current-page))))))
 
-(defun doc-scroll-cache-folder-size (&optional _)
-  (interactive)
+(defun doc-scroll-cache-folder-size (&optional arg)
+  (interactive "P")
   (car (split-string (shell-command-to-string
                       (format "du -sh '%s'"
-                              (concat "/tmp/"
-                                      (file-name-as-directory
-                                       (file-name-base (buffer-file-name)))))))))
+                              (print (concat "/tmp/" (unless arg "doc-tools/")
+                                       (file-name-as-directory
+                                        (file-name-base (buffer-file-name))))))))))
 
 ;; (define-derived-mode doc-scroll-mode special-mode "DS"
 
@@ -1230,25 +1230,45 @@ The number of COLUMNS can be set with a numeric prefix argument."
 (defun doc-scroll-annots-to-svg (annots from-size to-size)
   (let ((svg-annots (svg-group 'annotations)))
     (dolist (a annots)
-      (let* ((area (nth 3 a))
+      (let* ((text (nth 2 a))
+             (area (nth 3 a))
              (type (car area))
-             (coords (cdr area)))
+             (internal-coords (cdr area))
+             (coords (doc-scroll-coords-convert internal-coords
+                                                from-size
+                                                (pcase type
+                                                  ('line 'djvu-line)
+                                                  (_ 'djvu-annot))
+                                                to-size
+                                                (when (memq type '(rect text))
+                                                  'svg)))
+             (fill (car (alist-get (pcase type ('rect 'hilite) ('line 'lineclr) ('text 'backclr))
+                                   (nthcdr 4 a))))
+             (opacity (pcase type ('line 0.8) ('text 0.5) (_ (if fill 0.3 1)))))
         (apply (pcase type
-                 ('rect #'svg-rectangle)
-                 ('line #'svg-line))
+                 ('line #'svg-line)
+                 (_ #'svg-rectangle))
                svg-annots
-               (append (doc-scroll-coords-convert coords from-size (pcase type
-                                                                     ('rect 'djvu-annot)
-                                                                     ('line 'djvu-line))
-                                                  to-size (when (eq type 'rect) 'svg))
-                       (list :fill (car (alist-get (pcase type
-                                                     ('rect 'hilite)
-                                                     ('line 'lineclr))
-                                                   (nthcdr 4 a)))
-                             :stroke-color "black"
-                             :opacity (pcase type
-                                        ('rect 0.3)
-                                        ('line 0.8)))))))
+               (append coords
+                       (list :fill (or fill "none")
+                             :opacity opacity
+                             :stroke-color (if (memq type '(line text))
+                                               "black"
+                                             (or fill "red")))))
+        (when (eq type 'text)
+          (let ((text-size (round (* 100 (/ (float (car to-size))
+                                            (car from-size))))))
+            (svg-text
+             svg-annots text
+             :font-size (number-to-string text-size)
+             ;; :font-weight "bold"
+             :stroke "black"
+             :fill "black"
+             :font-family "Cursive"
+             ;; :letter-spacing "2pt"
+             :x (+ (nth 0 coords) 5)
+             :y (+ (nth 1 coords) text-size)
+             :stroke-width 1)))))
     svg-annots))
 
 (defun doc-scroll-matches-to-svg (matches from-size to-size)
