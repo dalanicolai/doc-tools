@@ -1,11 +1,12 @@
 ;; -*- lexical-binding: t; -*-
 
+(load (concat (file-name-directory (or load-file-name buffer-file-name))
+              "doc-scroll.el")) ;; load first so that setf is known
 (load "/home/dalanicolai/git/doc-tools-djvu/doc-djvu.el")
-(load (concat (file-name-directory (or load-file-name buffer-file-name)) "doc-scroll.el"))
 
 (defvar-local doc-scroll-current-rectangles nil)
 
-(define-derived-mode doc-scroll-djvu-mode special-mode "Doc-DJVU"
+(define-derived-mode doc-backend-djvu-mode special-mode "Doc-DJVU"
   (doc-djvu-decode-pages doc-scroll-overlay-width)
   (doc-scroll-minor-mode)
 
@@ -30,7 +31,13 @@
                                                                     position)))
               doc-scroll-info-function #'doc-djvu-info))
 
-(add-to-list 'auto-mode-alist '("\\.djvu\\'" . doc-scroll-djvu-mode))
+(add-to-list 'auto-mode-alist '("\\.djvu\\'" . doc-backend-djvu-mode))
+
+(defun doc-backend-djvu-structured-text (&optional page)
+  (if page
+      (car (alist-get 'text (alist-get page doc-scroll-contents)))
+    (mapcar (lambda (p) (car (alist-get 'text p))) doc-scroll-contents)))
+
 
 (defun doc-backend-djvu-save ()
   (interactive)
@@ -111,7 +118,7 @@
 ;;     (setq i (1+ i)))
 ;;   i)
 
-(defun doc-scroll-djvu-get-regions (page-contents start-point end-point)
+(defun doc-backend-djvu-get-regions (page-contents start-point end-point)
   ;; first we filter out the element in the correct column, we do not support
   ;; annotations that stretch over multiple columns.
   (doc-scroll-debug "%s %s" start-point end-point)

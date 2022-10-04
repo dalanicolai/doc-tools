@@ -25,7 +25,7 @@
          'g
          `(,(svg--arguments nil args))))
 
-(defcustom doc-scroll-overlay-width 952
+(defcustom doc-scroll-overlay-width 1184
   "The width of the cached images."
   :type 'numberp
   :group 'doc-scroll)
@@ -118,7 +118,7 @@ should just be a list of the document its intrinsic page sizes.")
 
 (defvar-local doc-scroll-last-page 0)
 (defvar-local doc-scroll-contents nil)
-(defvar-local doc-scroll-structured-contents nil)
+(defvar-local doc-scroll-structured-text nil)
 (defvar-local doc-scroll-image-type nil)
 (defvar-local doc-scroll-image-data-function nil)
 (defvar-local doc-scroll-thumbs-columns nil)
@@ -155,7 +155,7 @@ track of the state of the document.")
   (interactive (list
                 (intern
                  (completing-read "Select mode: "
-                                  '(doc-scroll-djvu-mode
+                                  '(doc-backend-djvu-mode
                                     djvu-init-mode
                                     doc-view-mode-maybe)))))
   (push (cons "\\.djvu\\'" mode) auto-mode-alist))
@@ -326,11 +326,6 @@ Setf-able function."
   (interactive "@e")
   (doc-scroll-select-region event t))
 
-(defun doc-scroll-structured-text (&optional page)
-  (if page
-      (car (alist-get 'text (alist-get page doc-scroll-contents)))
-    (mapcar (lambda (p) (car (alist-get 'text p))) doc-scroll-contents)))
-
 (defun doc-scroll-select-region (event &optional free)
   "Draw objects interactively via a mouse drag EVENT. "
   (interactive "@e")
@@ -338,13 +333,16 @@ Setf-able function."
          ;; (page (print (posn-area start)))
          (page (image-property (posn-image start) :page))
          (start-point (doc-scroll-coords-point-scale page (posn-object-x-y start)))
-         (text (doc-scroll-structured-text page))
+         (text (funcall (pcase major-mode
+                          ('doc-backend-djvu-mode #'doc-backend-djvu-structured-text)
+                          ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-structured-text))
+                        page))
          first-element
          result)
-    ;; NOTE we either must pass page to the 'doc-scroll-djvu-get-regions' and pdf
+    ;; NOTE we either must pass page to the 'doc-backend-djvu-get-regions' and pdf
     ;; version functions, or we should correct the coords for djvu here, we
     ;; choose the second option. DON'T SET THIS IN THE TRACK MOUSE WHILE LOOP
-    (when (eq major-mode 'doc-scroll-djvu-mode)
+    (when (eq major-mode 'doc-backend-djvu-mode)
       (setq start-point (cons (car start-point)
                               (- (cdr (doc-scroll-internal-size page)) (cdr start-point)))))
     (track-mouse
@@ -352,7 +350,7 @@ Setf-able function."
         (setq event (read-event))
         (let* ((end (event-end event))
                (end-point (doc-scroll-coords-point-scale page (posn-object-x-y end))))
-          (when (eq major-mode 'doc-scroll-djvu-mode)
+          (when (eq major-mode 'doc-backend-djvu-mode)
             ;; NOTE see note above 'track-mouse' about correcting coords
             (setq end-point (cons (car end-point)
                                   (- (cdr (doc-scroll-internal-size page)) (cdr end-point)))))
@@ -366,8 +364,8 @@ Setf-able function."
                                       (`(,x1 . ,y1) end-point))
                             (list (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1))))
                         (funcall (pcase major-mode
-                                   ('doc-scroll-pymupdf-mode #'doc-scroll-pymupdf-word-at-point)
-                                   ('doc-scroll-djvu-mode #'doc-scroll-djvu-get-regions))
+                                   ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-word-at-point)
+                                   ('doc-backend-djvu-mode #'doc-backend-djvu-get-regions))
                                  text start-point end-point))))
           (doc-scroll-display-page page))))))
 
@@ -433,6 +431,7 @@ Setf-able function."
   :lighter "DS"
   :keymap doc-scroll-mode-map
   (setq cursor-type nil)
+  (blink-cursor-mode -1)
 
   ;; we don't use `(image-mode-setup-winprops)' because it would additionally
   ;; add `image-mode-reapply-winprops' to the
@@ -821,7 +820,7 @@ columns"
       ;; (pymupdf-epc-page-base64-image-data page
       ;; doc-scroll-overlay-width))))
                                         ; (or (doc-scroll-overlay-get page 'data))
-      ;;  (when (eq major-mode 'doc-scroll-pymupdf-mode)
+      ;;  (when (eq major-mode 'doc-backend-pymupdf-mode)
       ;;    (funcall doc-scroll-image-data-function page width))))
       ;; (doc-scroll-display-page page nil)))
       (doc-scroll-display-page page data))))
@@ -837,9 +836,9 @@ columns"
                            (round (* scaling (cdr internal-size)))))
          (svg (svg-create (car image-size)
                           (cdr image-size)))
-         (text-elements (when (eq major-mode 'doc-scroll-djvu-mode)
+         (text-elements (when (eq major-mode 'doc-backend-djvu-mode)
                           (doc-djvu-text-elements 'char page)))
-         (annots (when (eq major-mode 'doc-scroll-djvu-mode)
+         (annots (when (eq major-mode 'doc-backend-djvu-mode)
                    (doc-scroll-annots page)))
          (annot-map (mapcar (lambda (a)
                               (pcase (car a)
@@ -864,15 +863,15 @@ columns"
                             ('pnm "image/x-portable-bitmap")))
          image)
     (when doc-scroll-svg-embed
-      ;; (when (eq major-mode 'doc-scroll-djvu-mode)
+      ;; (when (eq major-mode 'doc-backend-djvu-mode)
       (if data
-          (if (eq major-mode 'doc-scroll-pymupdf-mode)
+          (if (eq major-mode 'doc-backend-pymupdf-mode)
               (doc-scroll-pdf-epc-svg-embed-base64 svg data "image/png")
             (svg-embed svg data
                        image-mime-type
                        t))
         (svg-embed svg
-                   (concat "/tmp/"
+                   (concat "/tmp/doc-tools/"
                            (file-name-as-directory
                             (file-name-base (buffer-file-name)))
                            "pages/"
@@ -893,7 +892,7 @@ columns"
                                                                     (= (car m) page))
                                                                   matches)))
                               (list (doc-scroll-matches-to-svg (mapcar #'cdr page-matches) internal-size image-size))))))))
-    ;; (setq image (apply (if (eq major-mode 'doc-scroll-djvu-mode) ;doc-scroll-svg-embed
+    ;; (setq image (apply (if (eq major-mode 'doc-backend-djvu-mode) ;doc-scroll-svg-embed
     (setq image (apply (if doc-scroll-svg-embed
                            (apply-partially #'svg-image svg)
                          (apply-partially #'create-image data 'png t))
@@ -1052,7 +1051,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
   (let* ((buffer-name "*thumbs*")
          (buf (get-buffer buffer-name))
          (file (buffer-file-name))
-         (output-dir (concat "/tmp/"
+         (output-dir (concat "/tmp/doc-tools/"
                              (file-name-as-directory (file-name-base file))
                              "thumbs/"))
          (last-page doc-scroll-last-page)
@@ -1065,8 +1064,8 @@ The number of COLUMNS can be set with a numeric prefix argument."
         (with-current-buffer (get-buffer-create buffer-name)
           (unless (file-exists-p output-dir)
             (funcall (pcase mode
-                       ('doc-scroll-djvu-mode #'doc-djvu-decode-thumbs)
-                       (_ #'mupdf-create-thumbs))
+                       ('doc-backend-djvu-mode #'doc-djvu-decode-thumbs)
+                       (_ #'doc-mupdf-create-thumbs))
                      file))
           (doc-scroll-thumbs-mode)
           (setq doc-scroll-thumbs-columns columns)
@@ -1083,10 +1082,10 @@ The number of COLUMNS can be set with a numeric prefix argument."
                        (im (create-image (concat output-dir
                                                  (format "thumb%d." p)
                                                  (pcase mode
-                                                   ('doc-scroll-djvu-mode "tif")
+                                                   ('doc-backend-djvu-mode "tif")
                                                    (_ "png")))
                                          (pcase mode
-                                           ('doc-scroll-djvu-mode 'tiff)
+                                           ('doc-backend-djvu-mode 'tiff)
                                            (_ 'png))
                                          nil
                                          :margin '(2 . 1))))
@@ -1177,7 +1176,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
         (size (doc-scroll-overlay-size page)))
     (doc-scroll-coords-convert coords internal-size
                                (pcase major-mode
-                                 ('doc-scroll-djvu-mode 'djvu)
+                                 ('doc-backend-djvu-mode 'djvu)
                                  ('doc-scroll-mupdf-mode 'pdf))
                                size 'svg)))
 
@@ -1279,7 +1278,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
              (append (doc-scroll-coords-convert (cl-subseq m 0 4)
                                                 from-size
                                                 (pcase major-mode
-                                                  ('doc-scroll-djvu-mode 'djvu)
+                                                  ('doc-backend-djvu-mode 'djvu)
                                                   (_ 'pdf))
                                                 to-size 'svg)
                      (list :fill (or (plist-get m :fill) "yellow")
@@ -1294,7 +1293,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
              (append (doc-scroll-coords-convert r
                                                 from-size
                                                 (pcase major-mode
-                                                  ('doc-scroll-djvu-mode 'djvu)
+                                                  ('doc-backend-djvu-mode 'djvu)
                                                   (_ 'pdf))
                                                 to-size 'svg)
                      (list :fill (or (plist-get r :fill) "gray")
@@ -1308,7 +1307,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
                            (if-let (a (assq 'annots c))
                                (setcdr a ,val)
                              (setf (nth 1 c) (cons 'annots ,val)))))))
-  (if (not (eq major-mode 'doc-scroll-pymupdf-mode))
+  (if (not (eq major-mode 'doc-backend-pymupdf-mode))
       (if-let (a (cddr (alist-get page doc-scroll-annots)))
           a
         (alist-get 'annots
@@ -1321,9 +1320,9 @@ The number of COLUMNS can be set with a numeric prefix argument."
   ;; (unless doc-scroll-contents
   ;;   (setq doc-scroll-contents (funcall doc-scroll-contents-function)))
   (let ((results (funcall (pcase major-mode
-                            ('doc-scroll-djvu-mode
+                            ('doc-backend-djvu-mode
                              #'doc-djvu-search-word)
-                            ((or 'doc-scroll-pymupdf-mode
+                            ((or 'doc-backend-pymupdf-mode
                                  'doc-scroll-mupdf-mode)
                              #'poppler-search-word))
                           word)))

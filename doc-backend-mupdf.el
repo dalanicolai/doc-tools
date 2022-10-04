@@ -1,16 +1,18 @@
 ;; -*- lexical-binding: t; -*-
 
 (load-file "/home/dalanicolai/git/doc-tools-mupdf/doc-mupdf.el")
-(load-file "/home/dalanicolai/git/emacs-poppler/poppler.el")
+(load-file "/home/dalanicolai/git/doc-tools-poppler/doc-poppler.el")
 (load (concat (file-name-directory (or load-file-name buffer-file-name)) "doc-scroll.el"))
 
 (define-derived-mode doc-scroll-mupdf-mode special-mode "Doc-MuPDF"
   (doc-mupdf-create-pages doc-scroll-overlay-width)
   (doc-scroll-minor-mode)
 
-  (setq-local doc-scroll-internal-page-sizes (doc-mupdf-page-sizes)
-              doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              doc-scroll-structured-contents (poppler-structured-contents nil nil t)
+  (setq-local doc-scroll-last-page (doc-poppler-number-of-pages)
+              doc-scroll-internal-page-sizes (doc-poppler-page-sizes)
+              ;; doc-scroll-internal-page-sizes (doc-mupdf-page-sizes)
+              ;; doc-scroll-last-page (length doc-scroll-internal-page-sizes)
+              doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
 
                ;; doc-scroll-display-page-function #'doc-scroll-djvu-display-page
                doc-scroll-image-type 'png
