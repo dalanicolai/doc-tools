@@ -26,7 +26,8 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
   (epc:stop-epc doc-pymupdf-server))
 
 (define-derived-mode doc-backend-pymupdf-mode special-mode "DS-PyMuPDF"
-  (setq doc-pymupdf-server (epc:start-epc "python" '("doc-pymupdf-server.py")))
+  (let ((default-directory "/home/dalanicolai/git/doc-tools-pymupdf/"))
+    (setq doc-pymupdf-server (epc:start-epc "python" '("doc-pymupdf-server.py"))))
   (doc-pymupdf-init)
   (add-hook 'kill-buffer-hook #'doc-backend-pymupdf-kill-server nil t)
 
@@ -157,6 +158,13 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
       (setq i (1+ i)))
     (print (nth i text)))) ;NOTE posn-area only does not work for
 
+;; NOTE for use with doc-toc
+(defun doc-backend-pymupdf-extract-blocks (pred &optional page)
+  (mapcan (lambda (p)
+            (let* ((contents (doc-pymupdf-page-structured-text p 'blocks))
+                   (lines (seq-filter pred contents)))
+              (mapcar (lambda (l) (cons (nth 4 l) p)) (cdr lines))))
+         (or page (number-sequence 1 doc-scroll-last-page))))
 
 ;; (pp (pymupdf--imenu-parse-outline doc-scroll-imenu-index))
 

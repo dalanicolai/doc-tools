@@ -36,7 +36,10 @@
 (defun doc-backend-djvu-structured-text (&optional page)
   (if page
       (car (alist-get 'text (alist-get page doc-scroll-contents)))
-    (mapcar (lambda (p) (car (alist-get 'text p))) doc-scroll-contents)))
+    (let (text)
+      (dotimes (p (caar (last doc-scroll-contents)))
+        (push (car (alist-get 'text (alist-get (1+ p) doc-scroll-contents))) text))
+      (nreverse text))))
 
 
 (defun doc-backend-djvu-save ()
@@ -222,46 +225,46 @@
 
 ;; TODO this function should replace `doc-scroll--doc-djvu-get-matches'
 
-;; (defun doc-scroll--doc-djvu-get-matches (pattern contents)
-;;   (doc-scroll-structural-filter
-;;    (lambda (e)
-;;      (and (eq (car e) 'word)
-;;           (string-match pattern (nth 5 e))))
-;;    contents))
+(defun doc-backend-djvu-get-matches (pattern contents)
+  (doc-djvu-structural-filter
+   (lambda (e)
+     (and (eq (car e) 'word)
+          (string-match pattern (nth 5 e))))
+   contents))
 
-;; (defun doc-scroll-swiper-format-candidate (text format-spec page coords)
-;;   (let ((str (concat " " text)))
-;;     (put-text-property 0 1 'swiper-line-coords coords str)
-;;     (put-text-property 0 1 'swiper-page-number page str)
-;;     (put-text-property 0 1 'display (format swiper--format-spec page) str)
-;;     str))
+(defun doc-scroll-swiper-format-candidate (text format-spec page coords)
+  (let ((str (concat " " text)))
+    (put-text-property 0 1 'swiper-line-coords coords str)
+    (put-text-property 0 1 'swiper-page-number page str)
+    (put-text-property 0 1 'display (format swiper--format-spec page) str)
+    str))
 
-;; (defun doc-scroll-swiper-candidates ()
-;;   (let* ((swiper--width (1+ (floor (log doc-scroll-last-page 10))))
-;;          (swiper--format-spec
-;;           (format "%%-%dd " swiper--width))
-;;          (p 1)
-;;          candidates)
-;;     (dolist (contents (doc-djvu-structured-text 'para))
-;;       (if (stringp (nth 5 contents))
-;;           (push (doc-scroll-swiper-format-candidate (nth 5 contents)
-;;                                                  swiper--format-spec
-;;                                                  p
-;;                                                  (seq-subseq contents 0 5))
-;;                 candidates)
-;;         (named-let recur ((text (nthcdr 5 contents)))
-;;           (dolist (sub-contents text)
-;;             (if (stringp (nth 5 sub-contents))
-;;                 (push (doc-scroll-swiper-format-candidate
-;;                        (string-replace "" ""
-;;                                        (replace-regexp-in-string "- \n" "" (nth 5 sub-contents)))
-;;                        swiper--format-spec
-;;                        p
-;;                        (seq-subseq sub-contents 0 5))
-;;                       candidates)
-;;               (recur (nthcdr 5 sub-contents))))))
-;;       (setq p (1+ p)))
-;;     (nreverse candidates)))
+(defun doc-scroll-swiper-candidates ()
+  (let* ((swiper--width (1+ (floor (log doc-scroll-last-page 10))))
+         (swiper--format-spec
+          (format "%%-%dd " swiper--width))
+         (p 1)
+         candidates)
+    (dolist (contents (doc-djvu-structured-text 'line))
+      (if (stringp (nth 5 contents))
+          (push (doc-scroll-swiper-format-candidate (nth 5 contents)
+                                                 swiper--format-spec
+                                                 p
+                                                 (seq-subseq contents 0 5))
+                candidates)
+        (named-let recur ((text (nthcdr 5 contents)))
+          (dolist (sub-contents text)
+            (if (stringp (nth 5 sub-contents))
+                (push (doc-scroll-swiper-format-candidate
+                       (string-replace "" ""
+                                       (replace-regexp-in-string "- \n" "" (nth 5 sub-contents)))
+                       swiper--format-spec
+                       p
+                       (seq-subseq sub-contents 0 5))
+                      candidates)
+              (recur (nthcdr 5 sub-contents))))))
+      (setq p (1+ p)))
+    (nreverse candidates)))
 
 ;; (defun doc-scroll-structural-filter (fn hidden-text-list &optional format-fn)
 ;;   (let (elements)
@@ -372,78 +375,78 @@
 ;;           display-buffer-pop-up-window)
 ;;          (window-height . ,(1+ (ivy--height (ivy-state-caller ivy-last)))))))))
 
-;; (defun doc-scroll-swiper (&optional initial-input)
-;;   "`isearch-forward' with an overview.
-;; When non-nil, INITIAL-INPUT is the initial search pattern."
-;;   (interactive)
-;;   (let ((ivy-height (window-height))
-;;         (candidates (doc-scroll-swiper-candidates)))
-;;     (swiper--init)
-;;     (setq swiper-invocation-face
-;;           (plist-get (text-properties-at (point)) 'face))
-;;     (let ((preselect
-;;            (if (or swiper-use-visual-line (null search-invisible))
-;;                (count-screen-lines
-;;                 (point-min)
-;;                 (save-excursion (beginning-of-visual-line) (point)))
-;;              (1- (line-number-at-pos))))
-;;           (minibuffer-allow-text-properties t)
-;;           res)
-;;       (unwind-protect
-;;            (and
-;;             (setq res
-;;                   (ivy-read
-;;                    "Swiper: "
-;;                    candidates
-;;                    :initial-input initial-input
-;;                    :keymap swiper-map
-;;                    :preselect
-;;                    (if initial-input
-;;                        (cl-position-if
-;;                         (lambda (x)
-;;                           (<= (1+ preselect) (swiper--line-number x)))
-;;                         (progn
-;;                           (setq ivy--old-re nil)
-;;                           (ivy--filter initial-input candidates)))
-;;                      preselect)
-;;                    :require-match t
-;;                    ;; :action #'swiper--action
-;;                    ;; :action (lambda (c) (print c))
-;;                    :action (lambda (c)
-;;                              ;; (print ivy--old-cands))
-;;                              (print "hoi"))
-;;                              ;; (let* ((page (get-text-property 0 'swiper-page-number c))
-;;                              ;;        (coords (get-text-property 0 'swiper-line-coords c))
-;;                              ;;        (contents (nth (1- page)
-;;                              ;;                            doc-scroll-structured-contents))
-;;                              ;;        (page-width (nth 3 contents))
-;;                              ;;        (page-height (nth 4 contents))
-;;                              ;;        (scale (/ (car (nth (1- page) doc-scroll-page-sizes)) (float page-width))))
-;;                              ;;        ;; substring because candidates has an extra space for page-number display property
-;;                              ;;   ;;      (line-data  (doc-scroll-doc-djvu-search-page-matches (substring c 1) contents)))
-;;                              ;;   (push (append (mapcar (lambda (d)
-;;                              ;;                                 (round (* scale d)))
-;;                              ;;                               (doc-scroll-coords-to-svg page-height coords))
-;;                              ;;                 (list :fill "green" :opacity 0.5))
-;;                              ;;         doc-scroll-current-rectangles)
-;;                              ;;   (doc-scroll-goto-page page)))
-;;                                ;; (print ivy-text)))
-;;                    :re-builder #'swiper--re-builder
-;;                    :history 'swiper-history
-;;                    :extra-props (list :fname (buffer-file-name))
-;;                    :caller 'doc-scroll-swiper))
-;;             (point))
-;;         (unless (or res swiper-stay-on-quit)
-;;           (goto-char swiper--opoint))
-;;         (isearch-clean-overlays)
-;;         (unless (or res (string= ivy-text ""))
-;;           (cl-pushnew ivy-text swiper-history))
-;;         (setq swiper--current-window-start nil)
-;;         (when swiper--reveal-mode
-;;           (reveal-mode 1))))))
+(defun doc-scroll-swiper (&optional initial-input)
+  "`isearch-forward' with an overview.
+When non-nil, INITIAL-INPUT is the initial search pattern."
+  (interactive)
+  (let ((ivy-height (/ (window-height) 3))
+        (candidates (doc-scroll-swiper-candidates)))
+    (swiper--init)
+    (setq swiper-invocation-face
+          (plist-get (text-properties-at (point)) 'face))
+    (let ((preselect
+           (if (or swiper-use-visual-line (null search-invisible))
+               (count-screen-lines
+                (point-min)
+                (save-excursion (beginning-of-visual-line) (point)))
+             (1- (line-number-at-pos))))
+          (minibuffer-allow-text-properties t)
+          res)
+      (unwind-protect
+           (and
+            (setq res
+                  (ivy-read
+                   "Swiper: "
+                   candidates
+                   :initial-input initial-input
+                   :keymap swiper-map
+                   :preselect
+                   (if initial-input
+                       (cl-position-if
+                        (lambda (x)
+                          (<= (1+ preselect) (swiper--line-number x)))
+                        (progn
+                          (setq ivy--old-re nil)
+                          (ivy--filter initial-input candidates)))
+                     preselect)
+                   :require-match t
+                   ;; :action #'swiper--action
+                   ;; :action (lambda (c) (print c))
+                   :action (lambda (c)
+                             ;; (print ivy--old-cands))
+                             ;; (print "hoi"))
+                             (let* ((page (get-text-property 0 'swiper-page-number c))
+                                    (coords (get-text-property 0 'swiper-line-coords c))
+                                    (contents (nth (1- page)
+                                                   (doc-djvu-structured-text 'line)))
+                                    (page-width (nth 3 contents))
+                                    (page-height (nth 4 contents))
+                                    (scale (/ (car (nth (1- page) (doc-scroll-desired-overlay-sizes))) (float page-width))))
+                                    ;; substring because candidates has an extra space for page-number display property
+                               ;;      (line-data  (doc-scroll-doc-djvu-search-page-matches (substring c 1) contents)))
+                               (push (append (mapcar (lambda (d)
+                                                             (round (* scale d)))
+                                                     (doc-scroll-coords-to-svg page (cdr coords)))
+                                             (list :fill "green" :opacity 0.5))
+                                     doc-scroll-current-rectangles)
+                               (doc-scroll-goto-page page)))
+                               ;; (print ivy-text)))
+                   :re-builder #'swiper--re-builder
+                   :history 'swiper-history
+                   :extra-props (list :fname (buffer-file-name))
+                   :caller 'doc-scroll-swiper))
+            (point))
+        (unless (or res swiper-stay-on-quit)
+          (goto-char swiper--opoint))
+        (isearch-clean-overlays)
+        (unless (or res (string= ivy-text ""))
+          (cl-pushnew ivy-text swiper-history))
+        (setq swiper--current-window-start nil)
+        (when swiper--reveal-mode
+          (reveal-mode 1))))))
 
-;; (ivy-configure 'doc-scroll-swiper
-;;   :occur #'swiper-occur
-;;   :update-fn #'doc-scroll--swiper-update-fn
-;;   :unwind-fn #'swiper--cleanup
-;;   :index-fn #'ivy-recompute-index-swiper)
+(ivy-configure 'doc-scroll-swiper
+  :occur #'swiper-occur
+  :update-fn #'doc-scroll--swiper-update-fn
+  :unwind-fn #'swiper--cleanup
+  :index-fn #'ivy-recompute-index-swiper)

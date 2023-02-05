@@ -11,7 +11,7 @@ packages]] below), while, similar to doc-view, integrating all document
 viewing/editing into a single coherent, easier to understand and maintain,
 library.
 
-This packages mainly targets the GNU/linux platform, but it can probably made to
+This package mainly targets the GNU/linux platform, but it can probably made to
 work perfectly fine on other (non-)free platforms also.
 
 ** Important
@@ -86,7 +86,7 @@ Emacs is [[https://github.com/vedang/pdf-tools][pdf-tools]]. This package improv
   regions') can stretch over multiple lines or even full pages. (currently only
   implemented for djvu)
 - support for [[https://mupdf.com/][all document formats that are supported by mupdf (e.g. epub)]]
-  (requires the [[https://mupdf.com/docs/mutool.html][mupdf]] backend, which is the default)
+  (requires the [[https://mupdf.com/docs/mutool.html][mupdf]] backend)
 - much simpler code and therefore much more hackable than pdf-tools
 - modular design so that other packages can use 'individual' packages without
   installing all of doc-tools.

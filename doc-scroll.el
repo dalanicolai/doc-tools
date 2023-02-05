@@ -212,8 +212,8 @@ Folder contains thumb and page images."
                                                            (list doc-scroll-info-function))))
                      current-prefix-arg))
   (if (eq function doc-scroll-info-function)
-      (call-interactively function arg)
-    (pp (call-interactively function arg))))
+      (call-interactively function)
+    (pp (call-interactively function))))
 
 (defun doc-scroll-image-p (object)
   (eq (car object) 'image))
@@ -267,13 +267,13 @@ Setf-able function."
                                        (cdr (doc-scroll-overlay-size page))
                                      (doc-scroll-current-page))))))
 
-(defun doc-scroll-cache-folder-size (&optional arg)
+(defun doc-scroll-cache-folder-size (&optional _)
   (interactive "P")
   (car (split-string (shell-command-to-string
                       (format "du -sh '%s'"
-                              (print (concat "/tmp/" (unless arg "doc-tools/")
-                                       (file-name-as-directory
-                                        (file-name-base (buffer-file-name))))))))))
+                              (print (concat "/tmp/doc-tools/"
+                                             (file-name-as-directory
+                                              (file-name-base (buffer-file-name))))))))))
 
 ;; (define-derived-mode doc-scroll-mode special-mode "DS"
 
@@ -423,8 +423,12 @@ Setf-able function."
     "n" 'doc-scroll-search-next
     "i" 'doc-scroll-info
     "y" 'doc-scroll-kill-new
-    "o" 'imenu-list
+    "o" 'imenu-list-smart-toggle
     [down-mouse-1] 'doc-scroll-select-region))
+
+(when (featurep 'imenu-list)
+  (evil-define-key 'motion imenu-list-major-mode-map
+    "o" 'imenu-list-smart-toggle))
 
 (define-minor-mode doc-scroll-minor-mode
   "DS"
@@ -452,7 +456,9 @@ Setf-able function."
               `(" P" (:eval (number-to-string (doc-scroll-page-at-point)))
                 ;; Avoid errors during redisplay.
                 "/" ,(number-to-string doc-scroll-last-page)))
-  )
+
+  (when (featurep 'imenu-list)
+    (setq-local imenu-list-focus-after-activation t)))
 
 (defun doc-scroll-redisplay-all ()
   (dolist (win (get-buffer-window-list))
@@ -536,8 +542,11 @@ Setf-able function."
         ;; 'doc-scroll-redisplay' function
         (dotimes (i pages)
           (let ((o (make-overlay
-                    (prog1 (point) (insert (make-string doc-scroll-line-length (string-to-char " "))))
-                    (point))))
+                    ;; (prog1 (point) (insert (make-string doc-scroll-line-length (string-to-char " "))))
+                    ;; (point))))
+                    (point)
+                    (progn (insert (make-string doc-scroll-line-length (string-to-char " ")))
+                      (point)))))
             (insert "\n")
             (overlay-put o 'page  (1+ i))
             (overlay-put o 'window win)
@@ -1324,7 +1333,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
                              #'doc-djvu-search-word)
                             ((or 'doc-backend-pymupdf-mode
                                  'doc-scroll-mupdf-mode)
-                             #'poppler-search-word))
+                             #'doc-poppler-search-word))
                           word)))
     (setq doc-scroll-search-state (cons 0 results))
     (let* ((page (caadr doc-scroll-search-state))
@@ -1352,6 +1361,12 @@ The number of COLUMNS can be set with a numeric prefix argument."
 (defun doc-scroll-debug (format-string &rest args)
   (apply #'lwarn 'doc-scroll :debug format-string args)
   (car args))
+
+;;; translate
+(when (featurep 'libretrans)
+  (defun doc-scroll-translate-at-point ()
+    (interactive)
+    (libretrans-translate (doc-scroll-active-region-text))))
 
 (provide 'doc-scroll)
 ;;; doc-scroll.el ends here
