@@ -62,7 +62,9 @@
 (defun create-imenu (data)
   (mapcar (lambda (e)
             (let* ((str (car e))
-                   (page (substring (cadr e) 1))
+                   (page (let ((s (substring (cadr e) 1)))
+                           (string-match "[0-9]+" s)
+                           (string-trim-left (match-string 0 s) "0+")))
                    (formatted-str (concat
                                    (if (<= (length str) 55)
                                        (format (if (fboundp 'imenu-list) "%-55s " "%s ") str)
