@@ -4,7 +4,7 @@
 
 ;; In the precursory package, image-roll.el, we calculated the visible overlays
 ;; via the point and vscroll positions. However, Emacs already provides the
-;; function `overlays-in', to which we can simply pas the window-start and
+;; function `overlays-in', to which we can simply pass the window-start and
 ;; window-end positions. Using this functionality greatly reduced the complexity
 ;; of the code in the current package.
 
@@ -127,7 +127,7 @@ should just be a list of the document its intrinsic page sizes.")
 
 (defvar-local doc-scroll-annots nil
   "Container for annots.
-Its structure is an list with elements of the structure
+Its structure is a list with elements of the structure
 (PAGE . (MODIFIED . PAGE-ANNOTS)).
 
 This variable is only used when there is no server that keeps
@@ -143,6 +143,7 @@ track of the state of the document.")
                  (completing-read "Select mode: "
                                   '(pdf-view-mode
                                     doc-scroll-mupdf-mode
+                                    doc-backend-pymupdf-mode
                                     doc-view-mode-maybe)))))
 
   ;; remove pdf-view-mode from magic-mode alist

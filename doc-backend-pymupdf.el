@@ -37,7 +37,7 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
 
   (setq-local doc-scroll-internal-page-sizes (doc-pymupdf-page-sizes)
               doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              doc-scroll-structured-text (doc-poppler-structured-contents nil nil t)
+              doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
 
               ;; doc-scroll-display-page-function #'doc-backend-djvu-display-page
               doc-scroll-image-type 'png

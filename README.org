@@ -1,15 +1,23 @@
 #+TITLE: Doc Tools for Emacs
 
 * Introduction
-This package provides a (well working and very usable, but only partially
-implemented, demo of a) versatile Emacs document viewer/editor, combined with a
-set of tools for editing documents. Although the package has been written from
-scratch, it draws inspiration from other current document viewer/editor packages
-like doc-view, pdf-tools, and djvu. However, the goal of this package is to be,
-mostly, an improvement on the other packages (see [[Improvements over other
-packages]] below), while, similar to doc-view, integrating all document
-viewing/editing into a single coherent, easier to understand and maintain,
-library.
+This package provides a universal document reader for Emacs, combined with a set
+of tools for editing documents. It is centered around the [[doc-scroll]] 'display
+engine' (if I am allowed to use such fancy term). The [[doc-scroll]] display engine
+provides continuous scroll, and multiple column functionality, as displayed
+below:
+
+[[doc-tools-demo.gif]]
+
+In the above demo, we first show the continuous scroll and multi-column
+functionality. The number of columns can be easily selected by using a numerical
+prefix. Subsequently, we show the thumbnail side-bar functionality. As shown, the
+number of columns in the side-bar is variable also via a numerical prefix.
+
+The goal of this package is to be, mostly, an improvement on the other packages
+(see [[Improvements over other packages]] below), while, similar to doc-view,
+integrating all document viewing/editing into a single coherent, easier to
+understand and maintain, library.
 
 This package mainly targets the GNU/linux platform, but it can probably made to
 work perfectly fine on other (non-)free platforms also.
@@ -23,7 +31,12 @@ you can check the memory size of the books pages folder using
 =doc-scroll-cache-folder-size= (the recommended way is to call it via
 =doc-scroll-info= by pressing =i= from the book buffer).
 
-* Donate
+* Join / Donate
+The code in this package is very accessible for beginning emacs-lisp hackers. If
+you'd like to practice some elisp, while contributing to a package then check
+out the [[TODO]] list below. Of course you are always welcome to contact me (e.g. on
+github or per email).
+
 If this package helps you with your paid (or optionally your unpaid) work (or if
 you just like to support/popularize Emacs by supporting to make it more
 attractive and more useful for more people), then please help me with my work
@@ -68,6 +81,19 @@ organization may change, but currently this is how it is organized).
 So in the end it is just much easier to start from scratch, taking into account
 all new features while designing the package and optionally port features from
 the other packages (possibly also from djvu.el) into this package.
+
+** doc-scroll
+*** Simplified code
+The doc-scroll display engine is *an improved an simplified version of [[https://github.com/dalanicolai/image-roll.el][the
+image-roll display engine]]*. Instead of the cumbersome code for the display logic
+in /image-roll/, it simply uses the sophisticated [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Finding-Overlays.html][overlay searching functionality]]
+that is built-in in Emacs (see the initial comment in doc-scroll.el).
+
+*** Versatile rendering via SVG
+The doc-scroll display engine supports displaying the page images as SVG,
+enabling rendering of annotations in djvu documents (similar to [[https://github.com/dalanicolai/djvu3][djvu3.el]]), and
+the possibility to draw over pages (similar to [[https://github.com/dalanicolai/sketch-mode][sketch-mode]] and [[https://github.com/misohena/el-easydraw][el-easydraw]]).
+
 
 ** Improvements over other packages
 *** pdf-tools
@@ -143,6 +169,7 @@ package improves on image-roll in various ways
 
 ** pdf
 - [X] search forward
+- [X] imenu (provides TOC via [[https://melpa.org/#/imenu-list][imenu-list]])
 
 * Installation
 As this package is a work in development, and has not been published on any
@@ -158,12 +185,53 @@ buffer/load the file.
 
 ** mupdf
 Make sure that you have mupdf and poppler-urils installed (e.g. for Fedora use
-=sudo dnf install mupdf poppler-utils=). Then download the doc-tools-mupdf package
-from [[https://github.com/dalanicolai/doc-tools-mupdf][here]]. Finally, open [[file:/home/dalanicolai/git/doc-tools/doc-backend-mupdf.el][doc-backend-mupdf.el]], adjust the paths on top of the
-file and evaluate the buffer/load the file.
+=sudo dnf install mupdf poppler-utils=, for Ubuntu also mupdf-utils is required).
+Then download the doc-tools-mupdf package from [[https://github.com/dalanicolai/doc-tools-mupdf][here]]. Finally, open
+[[file:/home/dalanicolai/git/doc-tools/doc-backend-mupdf.el][doc-backend-mupdf.el]], adjust the paths on top of the file and evaluate the
+buffer/load the file.
+
+<<<<<<< Updated upstream
+** pymupdf
+=======
+<<<<<<< Updated upstream
+** pymupdf
+=======
+** pymupdf (recommended)
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
+The following installation instructions are not tested. Please let me know if
+anything is missing.
+
+- [[https://pypi.org/project/PyMuPDF/][pip install pymupdf]]
+- [[https://python-epc.readthedocs.io/en/latest/][pip install epc]]
+- install [[https://github.com/kiwanami/emacs-epc#installation][the epc package]] from MELPA
+- clone [[https://github.com/dalanicolai/pymupdf-epc][pymupdf-epc]]
+- open [[file:/home/dalanicolai/git/doc-tools/doc-backend-pymupdf.el][doc-backend-mupdf.el]], adjust paths and load the code
+
 
 * Usage
 Use =n c= to switch to display pages side-by-side (where =n= stands for a number
 that also determines the number of columns). Use =n t= to show the thumbs side-bar
 (=n= works same as with =c=). When showing more then about 5 columns, then using the
 =t= options is preferred (works more smoothly).
+
+Do =M-x imenu-list= to show outline (requires [[https://github.com/bmag/imenu-list][imenu-list]]).
+
+Do =M-x doc-scroll-info= to obtain all kinds of info about/data from a document.
+
+Do =M-x doc-scroll-search= (optionally followed by =M-x
+doc-scroll-search-previous/next= to search incrementally.
+
+Do =M-x doc-scroll-set-pdf/djvu-mode= to select which package to use for opening
+documents (e.g. quickly switch to opening with =PDF-tools=).
+
+** TODO
+** Add annotation range function to pymupdf backend
+To create some 'markup' annotation, one typically starts with some 'start' and
+'end' coordinates. From those coordinates, the exact region(s) for the
+highlights should be determined, i.e. extracted from the 'structured text
+contents'. As the data structure of structured text in djvu documents is easier
+to work with, than the data structure from pdf documents, the pymupdf backend
+can pass the structured text in 'djvu' format (Do =M-x doc-scroll-info= ->
+=doc-pymupdf-info= -> =doc-pymupdf-page-structured-text= -> insert page numbers ->
+=djvu=).
