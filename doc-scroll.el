@@ -456,7 +456,7 @@ Setf-able function."
   (setq-local mode-line-position
               `(" P" (:eval (number-to-string (doc-scroll-page-at-point)))
                 ;; Avoid errors during redisplay.
-                "/" ,(number-to-string doc-scroll-last-page)))
+                "/" (:eval (number-to-string doc-scroll-last-page))))
 
   (when (featurep 'imenu-list)
     (setq-local imenu-list-focus-after-activation t)))
