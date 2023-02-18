@@ -190,15 +190,7 @@ Then download the doc-tools-mupdf package from [[https://github.com/dalanicolai/
 [[file:/home/dalanicolai/git/doc-tools/doc-backend-mupdf.el][doc-backend-mupdf.el]], adjust the paths on top of the file and evaluate the
 buffer/load the file.
 
-<<<<<<< Updated upstream
-** pymupdf
-=======
-<<<<<<< Updated upstream
-** pymupdf
-=======
 ** pymupdf (recommended)
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 The following installation instructions are not tested. Please let me know if
 anything is missing.
 
