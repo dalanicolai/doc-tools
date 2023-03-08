@@ -433,8 +433,9 @@ Setf-able function."
 
 (define-minor-mode doc-scroll-minor-mode
   "DS"
-  :lighter "DS"
+  :lighter " DS"
   :keymap doc-scroll-mode-map
+  (buffer-disable-undo)
   (setq cursor-type nil)
   (blink-cursor-mode -1)
 
@@ -523,11 +524,11 @@ Setf-able function."
     (doc-scroll-update)))
 ;; (run-with-timer 0.01 nil #'doc-scroll-update)))
 
-;; NOTE this function is called via `doc-scroll-columns' in `doc-scroll-redisplay'. The
-;; function runs twice on first window creation, once for winprops of 'selected
-;; window', and once more for winprops of t holding a collection of winprops of
-;; all windows when the first winprops are added (i.e. triggered by the call to
-;; `image-mode-window-put')
+;; NOTE this function is called via `doc-scroll-columns' in
+;; `doc-scroll-redisplay'. The function runs twice on first window creation,
+;; once for winprops of 'selected window', and once more for winprops of t
+;; holding a collection of winprops of all windows when the first winprops are
+;; added (i.e. triggered by the call to `image-mode-window-put')
 (defun doc-scroll-new-window-function (winprops)
   (doc-scroll-debug "NEW_WINDOW")
   (if (not (overlays-at 1))
@@ -1322,6 +1323,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
           a
         (alist-get 'annots
                    (alist-get page doc-scroll-contents)))))
+
 ;;; search
 (defvar-local doc-scroll-search-state nil)
 

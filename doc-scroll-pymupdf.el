@@ -5,6 +5,9 @@
 ;; (load-file "/home/dalanicolai/git/doc-tools/doc-scroll.el")
 (load-file "/home/dalanicolai/git/doc-tools-pymupdf/doc-pymupdf-epc.el")
 
+(when (featurep 'undo-tree)
+  (add-to-list 'undo-tree-incompatible-major-modes 'doc-scroll-mode))
+
 (defvar doc-scroll-incompatible-modes '(visual-line-mode
                                         global-hl-line-mode))
 
@@ -12,24 +15,8 @@
 
 (cl-pushnew (cons "\\.pdf\\'" 'doc-scroll-mode) auto-mode-alist)
 
-(let ((counter 0))
-  (defun ladebug (&rest args)
-    (setq counter (1+ counter))
-    (apply #'lwarn 'doc-scroll :debug
-           (concat
-            (number-to-string counter)
-            " "
-            (number-to-string (minibuffer-depth))
-            (propertize (apply #'concat (make-list (1- (length args)) " %s"))
-                        'face '(foreground-color . "red"))
-            " %s")
-           args)
-    (car (last args))))
-    ;; (print (format "%s %s" message args) #'external-debugging-output)
-    ;; message)
-
 (defun doc-pymupdf-kill-server ()
-  (ladebug "STOP EPC")
+  ;; (ldbg "STOP EPC")
   (epc:stop-epc doc-pymupdf-epc-server))
 
 (setq doc-scroll-mode-map
@@ -60,6 +47,8 @@
         ;; (define-key map [S-down-mouse-1] 'doc-scroll-select-region-free)
         map))
 
+;; (add-hook 'doc-scroll-mode-hook (lambda nil (doc-pymupdf-epc-structured-text 'words)))
+
 (define-derived-mode doc-scroll-mode special-mode "DT"
 ;; (define-derived-mode doc-scroll-mode special-mode "DT"
   (let ((default-directory "/home/dalanicolai/git/doc-tools-pymupdf/"))
@@ -77,7 +66,9 @@
               doc-scroll-internal-page-sizes (doc-pymupdf-epc-page-sizes))
 
   (setq image-mode-winprops-alist nil)
-  (image-mode-winprops))
+  (image-mode-winprops)
+
+  (set-buffer-modified-p nil))
 
 (defun doc-scroll-create-overlays (number
                                    &optional columns hspace vspace text
@@ -87,7 +78,7 @@
     (funcall m -1))
   (toggle-truncate-lines 1) ; also disables visual-mode
   (let (overlays)
-    (ladebug "OVERLAYS")
+    ;; (ldbg "OVERLAYS")
     (dotimes (i number)
       (let* ((n (1+ i))
              (o (make-overlay
@@ -138,18 +129,146 @@
     (floor (* ratio (apply #'max (mapcar #'cdr doc-scroll-internal-page-sizes))))))
 
 (defun doc-scroll-visible-overlays ()
-  (let* ((visible (overlays-in (window-start) (ladebug (window-end nil t))))
+  (let* ((visible (overlays-in (window-start) (window-end nil t)))
          (start (apply #'min (mapcar (lambda (o) (overlay-get o 'i)) visible)))
          (end (apply #'max (mapcar (lambda (o) (overlay-get o 'i)) visible)))
          ;; include previous/next rows for 'smoother' displaying
-         (new-start (ldbg "start" (max (- start (image-mode-window-get 'columns)) 0)))
-         (new-end (ldbg "end" (min (+ end (image-mode-window-get 'columns)) (1- doc-scroll-number-of-pages)))))
+         (new-start (max (- start (image-mode-window-get 'columns)) 0))
+         (new-end (min (+ end (image-mode-window-get 'columns)) (1- doc-scroll-number-of-pages))))
          ;; start and end should be limited to index start/end page
     ;; (seq-subseq overlays (max new-start 0) (1+ (min new-end (length overlays))))))
-    (ldbg (seq-subseq (image-mode-window-get 'overlays) new-start (1+ new-end)))))
+    (seq-subseq (image-mode-window-get 'overlays) new-start (1+ new-end))))
 
-(defun doc-scroll-display-image (overlay data)
-  (overlay-put overlay 'display (create-image data 'png t)))
+(defun doc-svg-embed-base64 (svg data image-type &rest args)
+  "Insert IMAGE into the SVG structure.
+IMAGE should be a file name if DATAP is nil, and a binary string
+otherwise.  IMAGE-TYPE should be a MIME image type, like
+\"image/jpeg\" or the like."
+  (svg--append
+   svg
+   (dom-node
+    'image
+    `((xlink:href . ,(concat "data:" image-type ";base64," data))
+      ,@(svg--arguments svg args)))))
+
+(defun doc-scroll-display-image (overlay data &optional svg)
+  (let ((image (if svg
+		   (let* ((size (overlay-get overlay 'size))
+			  (svg (svg-create (car size) (cdr size))))
+		     (doc-svg-embed-base64 svg data "image/png")
+		     (svg-rectangle svg 0 0 200 200 :fill "red")
+		     (svg-image svg))
+		 (create-image data 'png t))))
+    (overlay-put overlay 'display image)
+    (when svg
+      (overlay-put overlay 'data data))))
+
+(defun doc-scroll-redisplay-svg (page &optional rectangle)
+  (let* ((overlay (doc-scroll-page-overlay page))
+	 (data (overlay-get overlay 'data))
+	 (image (let* ((size (overlay-get overlay 'size))
+		       (svg (svg-create (car size) (cdr size))))
+		  (doc-svg-embed-base64 svg data "image/png")
+		  (when doc-scroll-cursor-mode
+		    (apply #'svg-rectangle
+			   `(,svg ,@rectangle
+				  :fill "red" :opacity 0.5)))
+		  (svg-image svg))))
+    (overlay-put overlay 'display image)))
+
+(defun doc-scroll-coords-normalize (coords size &optional type)
+  (setq coords (mapcar #'float coords))
+  (pcase-let* ((`(,w . ,h) size)
+               (ratios (list (/ (nth 0 coords) w)
+                             (/ (nth 1 coords) h)
+                             (/ (nth 2 coords) w)
+                             (/ (nth 3 coords) h)))
+               (`(,x0 ,y0 ,x1 ,y1) ratios)
+               (dx x1)
+               (dy y1))
+    (pcase type
+      ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
+      ('svg (list x0 y0 (+ x0 dx) (+ y0 dy)))
+      ('djvu-annot (list x0 (- 1 (+ y0 dy)) (+ x0 dx) (- 1 y0)))
+      ('djvu-line (list x0 (- 1 y0) x1 (- 1 y1)))
+      (_ ratios))))
+
+(defun doc-scroll-coords-denormalize (coords size &optional type)
+  (pcase-let* ((`(,w . ,h) size)
+               (`(,x0 ,y0 ,x1 ,y1) coords)
+               (dx (- x1 x0))
+               (dy (- y1 y0))
+               (scale-factors (list w h w h)))
+    (cl-mapcar #'*
+               (pcase type
+                 ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
+                 ('svg (list x0 y0 dx dy))
+                 (_ coords))
+               scale-factors)))
+
+(defun doc-scroll-cursor-element (&optional index)
+  (let ((structured-text (nth (1- (car index))
+			      doc-scroll-structured-contents)))
+    (seq-find (lambda (e)
+		(equal (or (cdr index) (cdr (image-mode-window-get 'cursor)))
+		       (last e 3)))
+	      structured-text)))
+
+(defun doc-scroll-cursor-svg-coords (index)
+  (let* ((text-element (doc-scroll-cursor-element index))
+	 normalized-coords)
+    (if (not text-element)
+	nil
+      (setq normalized-coords (doc-scroll-coords-normalize (seq-take text-element 4)
+							   (nth (1- (car index)) doc-scroll-internal-page-sizes)))
+      (doc-scroll-coords-denormalize normalized-coords
+				     (overlay-get (doc-scroll-current-overlay) 'size)
+				     'svg))))
+
+  ;; (defmacro image-roll-page-overlay-get (page prop)
+;;   "Get overlay-property PROP of overlay holding page number PAGE.
+;; Implemented as macro to make it setf'able."
+;;   `(overlay-get (nth (1- ,page) (image-roll-overlays))
+;;                 ,prop))
+(defun doc-scroll-increase-index (index type)
+  (let ((n (pcase type ('page 0) ('block 1) ('line 2) ('word 3))))
+    (cl-incf (nth n index))
+    (let ((e (doc-scroll-cursor-element index)))
+      (if (and e (cl-every (apply-partially #'<= 0) (seq-take e 4)))
+	  index
+	(if (eq type 'page)
+	    (message "No next unit")
+	  (let ((i 3))
+	    (while (>= i n)
+	      (setf (nth i index) 0)
+	      (setq i (1- i))))
+	  (doc-scroll-increase-index index (pcase type
+					     ('word 'line)
+					     ('line 'block)
+					     ('block 'page))))))))
+  
+(defun doc-scroll-cursor-next-unit (type)
+  (let* ((index (image-mode-window-get 'cursor))
+	 (page (car index))
+	 (structured-text (nth (1- page) doc-scroll-structured-contents)))
+    (doc-scroll-increase-index index type)
+    (image-mode-window-put 'cursor index)
+    (doc-scroll-redisplay-svg page (doc-scroll-cursor-svg-coords index))))
+
+(defun doc-scroll-cursor-next-line ()
+  (interactive)
+  (doc-scroll-cursor-next-unit 'word))
+
+(define-minor-mode doc-scroll-cursor-mode
+  "Display and edit by cursor"
+  :lighter "DC"
+  :keymap '(("a" . doc-scroll-cursor-next-line))
+  (let* ((page (doc-scroll-current-page))
+	 (index (list page 0 0 0))
+	 (svg-coords (or (doc-scroll-cursor-svg-coords index)
+			 (doc-scroll-cursor-svg-coords (doc-scroll-increase-index index 'word)))))
+    (image-mode-window-put 'cursor index)
+    (doc-scroll-redisplay-svg page svg-coords)))
 
 (defun doc-scroll-add-annot (page edges style &optional display)
   (let* ((o (doc-scroll-page-overlay page))
@@ -157,16 +276,21 @@
     (base64-decode-string base64-data)))
     ;; (doc-scroll-display-image o data)))
 
-(defun doc-scroll-display-page (overlay &optional async)
-  (ladebug "EPC")
-  (let ((data (funcall (if async #'epc:call-deferred #'epc:call-sync)
-		       doc-pymupdf-epc-server
-		       'renderpage_data
-		       (list (1+ (overlay-get overlay 'i))
-			     (car (overlay-get overlay 'size)))))
-	(display (lambda (x)
-		   (doc-scroll-display-image overlay
-					     (base64-decode-string x)))))
+(defun doc-scroll-display-page (overlay &optional async svg)
+  ;; (ldbg "EPC")
+  (when (numberp overlay)
+    (setq overlay (doc-scroll-page-overlay overlay)))
+  (let* ((size (overlay-get overlay 'size))
+	 (data (funcall (if async #'epc:call-deferred #'epc:call-sync)
+			doc-pymupdf-epc-server
+			'renderpage_base64
+			(list (1+ (overlay-get overlay 'i))
+			      (car size))))
+	 (display (lambda (x)
+		    (doc-scroll-display-image overlay
+					      ;; (base64-decode-string x)
+					      x
+					      t))))
     (if async
 	(deferred:$ data
 		    (deferred:nextc it display))
@@ -178,17 +302,17 @@
 
 ;; The buffer-locally defined functions get called for each window
 (defun doc-scroll-redisplay (&optional force)
-  (ladebug "WINDOW CONFIGURATION CHANGE")
+  ;; (ldbg "WINDOW CONFIGURATION CHANGE")
   (when (or force
             (/= (or (image-mode-window-get 'win-width) -1)
                 (window-pixel-width)))
     (image-mode-window-put 'win-width (window-pixel-width))
     (let* ((w (doc-scroll-overlay-base-width (image-mode-window-get 'columns) 0))
            (h (doc-scroll-overlay-base-height w))
-           (overlays (ladebug (image-mode-window-get 'overlays))))
+           (overlays (image-mode-window-get 'overlays)))
       (dolist (o overlays)
         (overlay-put o 'display `(space . (:width (,w) :height (,h))))
-        (overlay-put o 'size (ladebug (cons w h))))
+        (overlay-put o 'size (cons w h)))
       ;; NOTE this seems not required when a non-nil UPDATE argument is passes
       ;; to the `window-end' function (however, the outcommenting might lead
       ;; errors)
@@ -202,9 +326,9 @@
 ;; somehow (i.e. directly or indirectly) get called from the
 ;; `window-configuration-change-hook'.
 (defun doc-scroll-new-window-function (winprops)
-  (ladebug "NEW WINDOW")
-  ;; (ladebug (car winprops))
-  ;; (ladebug  image-mode-winprops-alist)
+  ;; (ldbg "NEW WINDOW")
+  ;; (ldbg (car winprops))
+  ;; (ldbg  image-mode-winprops-alist)
   (if (not (overlays-at 1))
       (let ((inhibit-read-only t)
             overlays) ; required because we derive mode (inherit) from
@@ -214,7 +338,7 @@
         (setq overlays (doc-scroll-create-overlays doc-scroll-number-of-pages
                                                    nil nil nil
                                                    (make-string 120 (string-to-char " "))
-                                                   'window (ladebug (car winprops))))
+                                                   'window (car winprops)))
         (image-mode-window-put 'overlays overlays)
         (image-mode-window-put 'columns 1))
 
@@ -251,7 +375,7 @@
         (current-overlay-height (doc-scroll-current-overlay-height))
         (before (doc-scroll-visible-overlays))
         after)
-    (cond ((> new-vscroll current-overlay-height)
+    (cond ((> (ldbg  new-vscroll) (ldbg  current-overlay-height))
            (doc-scroll-next-unit (image-mode-window-get 'columns))
            (recenter 0)
            (redisplay)
