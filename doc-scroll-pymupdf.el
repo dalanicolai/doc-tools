@@ -21,10 +21,10 @@
 
 (setq doc-scroll-mode-map
       (let ((map (make-sparse-keymap)))
-        (define-key map (kbd "C-n") 'doc-scroll-scroll-forward)
-        (define-key map (kbd "<down>") 'doc-scroll-scroll-forward)
-        (define-key map (kbd "C-p") 'doc-scroll-scroll-backward)
-        (define-key map (kbd "<up>") 'doc-scroll-scroll-backward)
+        (define-key map (kbd "C-n") 'doc-scroll-forward)
+        (define-key map (kbd "<down>") 'doc-scroll-forward)
+        (define-key map (kbd "C-p") 'doc-scroll-backward)
+        (define-key map (kbd "<up>") 'doc-scroll-backward)
         (define-key map (kbd "<wheel-down>") 'doc-scroll--scroll-forward)
         (define-key map (kbd "<wheel-up>") 'doc-scroll-scroll-backward)
         ;; (define-key map (kbd "<mouse-5>") 'doc-scroll--scroll-forward)
@@ -33,8 +33,8 @@
         (define-key map (kbd "<next>") 'doc-scroll-next-page)
         (define-key map "p" 'doc-scroll-previous-page)
         (define-key map (kbd "<prior>") 'doc-scroll-previous-page)
-        (define-key map (kbd "S-<next>") 'doc-scroll-scroll-screen-forward)
-        (define-key map (kbd "S-<prior>") 'doc-scroll-scroll-screen-backward)
+        (define-key map (kbd "S-<next>") 'doc-scroll-screen-forward)
+        (define-key map (kbd "S-<prior>") 'doc-scroll-screen-backward)
         (define-key map [remap goto-line] 'doc-scroll-goto-page)
         (define-key map "f" 'doc-scroll-fit-toggle)
         (define-key map "c" 'doc-scroll-set-columns)
@@ -56,6 +56,7 @@
   (doc-pymupdf-epc-init)
   (add-hook 'kill-buffer-hook #'doc-pymupdf-kill-server nil t)
 
+
   (dolist (m doc-scroll-incompatible-modes)
     (funcall m -1))
 
@@ -68,7 +69,8 @@
   (setq image-mode-winprops-alist nil)
   (image-mode-winprops)
 
-  (set-buffer-modified-p nil))
+  (set-buffer-modified-p nil)
+  (ldbg "doc-scroll-mode"))
 
 (defun doc-scroll-create-overlays (number
                                    &optional columns hspace vspace text
@@ -302,7 +304,7 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
 
 ;; The buffer-locally defined functions get called for each window
 (defun doc-scroll-redisplay (&optional force)
-  ;; (ldbg "WINDOW CONFIGURATION CHANGE")
+  (ldbg "WINDOW CONFIGURATION CHANGE (redisplay)")
   (when (or force
             (/= (or (image-mode-window-get 'win-width) -1)
                 (window-pixel-width)))
@@ -368,39 +370,120 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
          after)
     (goto-char (overlay-start next))))
 
-(defun doc-scroll--scroll-forward (&optional screen)
-  (let ((new-vscroll (+ (window-vscroll nil t) (if screen
-                                                   (window-text-height nil t)
-                                                 doc-scroll-step-size)))
-        (current-overlay-height (doc-scroll-current-overlay-height))
-        (before (doc-scroll-visible-overlays))
-        after)
-    (cond ((> (ldbg  new-vscroll) (ldbg  current-overlay-height))
-           (doc-scroll-next-unit (image-mode-window-get 'columns))
-           (recenter 0)
-           (redisplay)
-           (set-window-vscroll nil (floor (- new-vscroll current-overlay-height)) t))
-           ;; (run-hooks 'doc-scroll-after-change-page-hook))
-          ;; ((> (+ new-vscroll (window-text-height nil t)) (cdr (doc-scroll-current-size)))
-          ;;  (cond ((and (= (doc-scroll-columns) 1) (= (doc-scroll-page-at-point) doc-scroll-last-page))
-          ;;         (message "End of buffer"))
-          ;;        (t
-          ;;         (doc-scroll-set-window-fscroll new-vscroll)
-          ;;         (doc-scroll-update))))
-          (t (if (and (= (doc-scroll-current-page) (length (image-mode-window-get 'overlays)))
-                  (> (+ new-vscroll (window-text-height nil t)) (doc-scroll-current-overlay-height)))
-                 (message "End of buffer")
-               (set-window-vscroll nil new-vscroll t))))
-    (redisplay)
-    (setq after (doc-scroll-visible-overlays))
-    (dolist (o (seq-difference before after))
-      (doc-scroll-undisplay-page o))
-    (dolist (o (seq-difference after before))
-      (doc-scroll-display-page o t))))
+(defmacro doc-scroll-overlays (&optional winprops)
+  "List of overlays that make up a scroll.
+Setf-able function."
+  `(image-mode-window-get 'overlays ,winprops))
 
-(defun doc-scroll-scroll-forward (n &optional previous)
+(defun doc-scroll-overlay-size (page)
+  "List of overlays that make up a scroll."
+  (overlay-get (nth (1- page) (doc-scroll-overlays)) 'size))
+
+(defun doc-scroll-vscroll-to-pscroll (&optional vscroll)
+  "Scroll in units of page size."
+  (/ (float (or vscroll (window-vscroll nil t)))
+     (cdr (doc-scroll-overlay-size (doc-scroll-current-page)))))
+
+(defun doc-scroll-pscroll-to-vscroll (pscroll &optional page)
+  (* pscroll
+     (cdr (doc-scroll-overlay-size (if page
+                                       (cdr (doc-scroll-overlay-size page))
+                                     (doc-scroll-current-page))))))
+
+(defun doc-scroll--forward (&optional n row)
+  "Scroll forward N units.
+Default unit is pixels. If ROW is non-nil then unit is row, which
+is equivalent to page if the value of `doc-scroll-columns` is 1.
+If N is nil, the value of `doc-scroll-step-size` is used."
+  (let ((old-vscroll (window-vscroll nil t))
+	(old-overlays (doc-scroll-visible-overlays)))
+
+    (if row
+	(let ((pscroll (doc-scroll-vscroll-to-pscroll)))
+	  (if (= (doc-scroll-current-page) (length (image-mode-window-get 'overlays)))
+	      (message "End of buffer")
+	    (forward-line n)
+	    (image-set-window-vscroll old-vscroll)))
+
+      (let ((new-vscroll (+ old-vscroll (or n doc-scroll-step-size)))
+            (current-overlay-height (doc-scroll-current-overlay-height)))
+	(cond ((> (ldbg  new-vscroll) (ldbg  current-overlay-height))
+	       (forward-line)
+               (set-window-vscroll nil (floor (- new-vscroll current-overlay-height)) t))
+              (t (if (and (= (doc-scroll-current-page) (length (image-mode-window-get 'overlays)))
+			  (> (+ new-vscroll (window-text-height nil t)) (doc-scroll-current-overlay-height)))
+                     (message "End of buffer")
+		   (image-set-window-vscroll new-vscroll))))))
+
+    (redisplay)
+    (let ((new-overlays (doc-scroll-visible-overlays)))
+      (dolist (o (seq-difference old-overlays new-overlays))
+	(doc-scroll-undisplay-page o))
+      (dolist (o (seq-difference new-overlays old-overlays))
+	(doc-scroll-display-page o t)))))
+      
+(defun doc-scroll--backward (&optional n row)
+  (let ((old-vscroll (window-vscroll nil t))
+	(old-overlays (doc-scroll-visible-overlays)))
+
+    (if row
+	(let ((pscroll (doc-scroll-vscroll-to-pscroll)))
+	  (if (= (doc-scroll-current-page) 1)
+              (progn (image-set-window-vscroll 0)
+		     (message "Beginning of buffer"))
+	    (forward-line (- (or n 1)))
+	    (image-set-window-vscroll old-vscroll)))
+
+      (let ((new-vscroll (- old-vscroll (or n doc-scroll-step-size)))
+            (current-overlay-height (doc-scroll-current-overlay-height)))
+	(cond ((< (ldbg  new-vscroll) 0)
+	       (if (= (doc-scroll-current-page) 1)
+                     (message "Beginning of buffer")
+		 (forward-line -1)
+		 (set-window-vscroll nil (floor (- current-overlay-height old-vscroll)) t)))
+              (t (image-set-window-vscroll new-vscroll)))))
+
+    (redisplay)
+    (let ((new-overlays (doc-scroll-visible-overlays)))
+      (dolist (o (seq-difference old-overlays new-overlays))
+	(doc-scroll-undisplay-page o))
+      (dolist (o (seq-difference new-overlays old-overlays))
+	(doc-scroll-display-page o t)))))
+
+    ;; (cond ((< new-vscroll 0)
+    ;;        (cond ((<= (doc-scroll-page-at-point) (doc-scroll-columns))
+    ;;               (doc-scroll-set-window-fscroll 0) ;or set to vertical margin
+    ;;               (message "Beginning of buffer"))
+    ;;              (t
+    ;;               (forward-line -1)
+    ;;               (doc-scroll-set-window-fscroll (cdr (doc-scroll-current-size)))
+    ;;               (doc-scroll-update)
+    ;;               (run-hooks 'doc-scroll-after-change-page-hook))))
+    ;;       ((< new-vscroll (- (window-text-height nil t) (cdr (doc-scroll-current-size))))
+    ;;        (doc-scroll-set-window-fscroll new-vscroll)
+    ;;        (doc-scroll-update))
+    ;;       (t (doc-scroll-set-window-fscroll new-vscroll)))))
+
+      
+(defun doc-scroll-forward (n)
   (interactive "p")
-  (dotimes (i n)
-    (if previous
-        (doc-scroll--scroll-backward)
-      (doc-scroll--scroll-forward))))
+  (dotimes (_ n)
+    (doc-scroll--forward)))
+
+(defun doc-scroll-backward (n)
+  (interactive "p")
+  (dotimes (_ n)
+    (doc-scroll--backward)))
+
+(defun doc-scroll-screen-forward (n)
+  (interactive "p")
+  (dotimes (_ n)
+    (doc-scroll--forward (window-text-height nil t))))
+
+(defun doc-scroll-next-page (n)
+  (interactive "p")
+  (doc-scroll--forward n t))
+
+(defun doc-scroll-previous-page (n)
+  (interactive "p")
+  (doc-scroll--backward n t))
