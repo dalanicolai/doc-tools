@@ -8,6 +8,13 @@
 (when (featurep 'undo-tree)
   (add-to-list 'undo-tree-incompatible-major-modes 'doc-scroll-mode))
 
+(defvar-local doc-scroll-dir (concat user-emacs-directory "doc-scroll/"))
+(defvar-local doc-scroll-number-of-pages 0)
+(defvar-local doc-scroll-internal-page-sizes nil)
+(defvar-local doc-scroll-drag-action 'select)
+
+(defvar-local doc-scroll-structured-text nil)
+
 (defvar doc-scroll-incompatible-modes '(visual-line-mode
                                         global-hl-line-mode))
 
@@ -43,11 +50,19 @@
         (define-key map "i" 'doc-scroll-info)
         (define-key map "y" 'doc-scroll-kill-new)
         (define-key map (kbd "C-s") 'doc-scroll-search)
-        ;; (define-key map [down-mouse-1] 'doc-scroll-select-region)
+        (define-key map [down-mouse-1] 'doc-scroll-select-region)
         ;; (define-key map [S-down-mouse-1] 'doc-scroll-select-region-free)
         map))
 
 ;; (add-hook 'doc-scroll-mode-hook (lambda nil (doc-pymupdf-epc-structured-text 'words)))
+(defun doc-scroll-save-structured-text ()
+  (interactive)
+  (let ((file-name-base (file-name-base buffer-file-name))
+	(stext doc-scroll-structured-text))
+    (unless (file-exists-p doc-scroll-dir)
+      (make-directory doc-scroll-dir))
+    (with-temp-file (concat doc-scroll-dir file-name-base ".el")
+      (print stext (current-buffer)))))
 
 (define-derived-mode doc-scroll-mode special-mode "DT"
 ;; (define-derived-mode doc-scroll-mode special-mode "DT"
@@ -63,8 +78,21 @@
   (add-hook 'window-configuration-change-hook 'doc-scroll-redisplay nil t)
   (add-hook 'image-mode-new-window-functions 'doc-scroll-new-window-function nil t)
 
-  (setq-local doc-scroll-number-of-pages (doc-pymupdf-epc-number-of-pages)
-              doc-scroll-internal-page-sizes (doc-pymupdf-epc-page-sizes))
+  (setq doc-scroll-number-of-pages (doc-pymupdf-epc-number-of-pages)
+        doc-scroll-internal-page-sizes (doc-pymupdf-epc-page-sizes))
+
+  
+  ;; get structured text from file or asynchronously from server
+  (let ((stext-file (concat doc-scroll-dir (file-name-base buffer-file-name) ".el")))
+    (if (file-exists-p stext-file)
+	(setq doc-scroll-structured-text (with-temp-buffer
+					   (insert-file-contents-literally stext-file)
+					   (read (current-buffer))))
+      ;; reading all text at once blocks Emacs, and can crash the server
+      (run-with-idle-timer 1 nil (lambda ()
+				   (dotimes (i doc-scroll-number-of-pages)
+				     (let ((p (1+ i)))
+				       (doc-pymupdf-epc-structured-text 'words p p t t)))))))
 
   (setq image-mode-winprops-alist nil)
   (image-mode-winprops)
