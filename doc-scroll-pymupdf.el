@@ -13,7 +13,7 @@
 
 (defvar-local doc-scroll-step-size 80)
 
-(cl-pushnew (cons "\\.pdf\\'" 'doc-scroll-mode) auto-mode-alist)
+(add-to-list 'auto-mode-alist (cons "\\.pdf\\'" 'doc-scroll-mode))
 
 (defun doc-pymupdf-kill-server ()
   ;; (ldbg "STOP EPC")
