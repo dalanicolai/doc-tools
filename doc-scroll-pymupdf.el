@@ -1,6 +1,32 @@
-;;; -*- lexical-binding: t; -*-
+;;; doc-scroll-pymupdf.el --- Universal versatile document reader  -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2023  Daniel Nicolai
+
+;; Author: Daniel Nicolai
+;; Keywords: tools
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; 
+
+;;; Code:
 (require 'image-mode)
+(require 'svg)
+(require 'cl-lib)
+(require 'dash)
 
 ;; (load-file "/home/dalanicolai/git/doc-tools/doc-scroll.el")
 (load-file "/home/dalanicolai/git/doc-tools-pymupdf/doc-pymupdf-epc.el")
@@ -182,16 +208,24 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
       ,@(svg--arguments svg args)))))
 
 (defun doc-scroll-display-image (overlay data &optional svg)
-  (let ((image (if svg
-		   (let* ((size (overlay-get overlay 'size))
-			  (svg (svg-create (car size) (cdr size))))
-		     (doc-svg-embed-base64 svg data "image/png")
-		     (svg-rectangle svg 0 0 200 200 :fill "red")
-		     (svg-image svg))
-		 (create-image data 'png t))))
-    (overlay-put overlay 'display image)
-    (when svg
-      (overlay-put overlay 'data data))))
+  "Create image from DATA and display it in OVERLAY.
+
+When SVG is non-nil, DATA should be base64 encoded. Otherwise
+data should be binary."
+  (when svg
+    (overlay-put overlay 'data data)
+    (setq data (let* ((size (overlay-get overlay 'size))
+		      (svg (svg-create (car size) (cdr size))))
+		 (doc-svg-embed-base64 svg data "image/png")
+		 (svg-rectangle svg 0 0 200 200 :fill "red")
+		 svg)))
+
+  (let* ((fn (if svg
+		 (apply-partially #'svg-image data)
+	       (apply-partially #'create-image data 'png t)))
+	 (image (funcall fn :page (1+ (overlay-get overlay 'i)))))
+
+    (overlay-put overlay 'display image)))
 
 (defun doc-scroll-redisplay-svg (page &optional rectangle)
   (let* ((overlay (doc-scroll-page-overlay page))
@@ -199,7 +233,8 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
 	 (image (let* ((size (overlay-get overlay 'size))
 		       (svg (svg-create (car size) (cdr size))))
 		  (doc-svg-embed-base64 svg data "image/png")
-		  (when doc-scroll-cursor-mode
+		  ;; (when doc-scroll-cursor-mode
+		  (when rectangle
 		    (apply #'svg-rectangle
 			   `(,svg ,@rectangle
 				  :fill "red" :opacity 0.5)))
@@ -303,24 +338,28 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
 (defun doc-scroll-add-annot (page edges style &optional display)
   (let* ((o (doc-scroll-page-overlay page))
 	 (base64-data (doc-pymupdf-epc-add-annot page edges style display (car (overlay-get o 'size)))))
-    (base64-decode-string base64-data)))
-    ;; (doc-scroll-display-image o data)))
+    ;; (base64-decode-string base64-data)))
+    (doc-scroll-display-image o base64-data t)))
 
 (defun doc-scroll-display-page (overlay &optional async svg)
   ;; (ldbg "EPC")
-  (when (numberp overlay)
-    (setq overlay (doc-scroll-page-overlay overlay)))
-  (let* ((size (overlay-get overlay 'size))
+  (let* ((page (if (numberp overlay)
+		   (prog1 overlay
+		     (setq overlay (doc-scroll-page-overlay overlay)))
+		 (1+ (overlay-get overlay 'i))))
+	 (size (overlay-get overlay 'size))
 	 (data (funcall (if async #'epc:call-deferred #'epc:call-sync)
 			doc-pymupdf-epc-server
 			'renderpage_base64
-			(list (1+ (overlay-get overlay 'i))
-			      (car size))))
+			(list page (car size))))
+	 ;; (text (when (and svg (not (overlay-get overlay 'text))
+	 ;; 	 (ldbg (doc-pymupdf-epc-structured-text 'words page page)))))
 	 (display (lambda (x)
 		    (doc-scroll-display-image overlay
 					      ;; (base64-decode-string x)
-					      x
-					      t))))
+					      x t
+					      ))))
+    ;; (when text (overlay-put overlay 'text text))
     (if async
 	(deferred:$ data
 		    (deferred:nextc it display))
