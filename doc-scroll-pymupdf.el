@@ -252,13 +252,14 @@ data should be binary."
                (dx x1)
                (dy y1))
     (pcase type
-      ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
-      ('svg (list x0 y0 (+ x0 dx) (+ y0 dy)))
-      ('djvu-annot (list x0 (- 1 (+ y0 dy)) (+ x0 dx) (- 1 y0)))
-      ('djvu-line (list x0 (- 1 y0) x1 (- 1 y1)))
+      ('djvu (list x0 (- 1 y1) x1 (- 1 y0))) ; from bottom x1 y1 x2 y2
+      ('svg (list x0 y0 (+ x0 dx) (+ y0 dy))) ; from top: x y dx dy
+      ('djvu-annot (list x0 (- 1 (+ y0 dy)) (+ x0 dx) (- 1 y0))) ; from bottom x y dx dy
+      ('djvu-line (list x0 (- 1 y0) x1 (- 1 y1))) ; should be same as djvu?
       (_ ratios))))
 
 (defun doc-scroll-coords-denormalize (coords size &optional type)
+  "Inverse of `doc-scroll-coords-normalize'"
   (pcase-let* ((`(,w . ,h) size)
                (`(,x0 ,y0 ,x1 ,y1) coords)
                (dx (- x1 x0))
@@ -554,3 +555,86 @@ If N is nil, the value of `doc-scroll-step-size` is used."
 (defun doc-scroll-previous-page (n)
   (interactive "p")
   (doc-scroll--backward n t))
+
+(defun doc-scroll-overlay-selected-window-filter (overlays)
+  (cl-remove-if-not
+   (lambda (overlay)
+     (eq (overlay-get overlay 'window) (selected-window)))
+   overlays))
+
+(defun doc-scroll-overlay-selected-window (overlays)
+  (cl-find-if
+   (lambda (overlay)
+     (eq (overlay-get overlay 'window) (selected-window)))
+   overlays))
+
+;;; annots
+
+(defun doc-scroll-coords-point-scale (page coords)
+  "Scale mouse click position to internal page coords"
+  (pcase-let ((`(,iw . ,ih) (doc-scroll-internal-size page))
+              (`(,w . ,h) (doc-scroll-overlay-size page)))
+    (cons (* (/ (float iw) w) (car coords))
+          (* (/ (float ih) h) (cdr coords)))))
+
+(defun doc-scroll-internal-size (page)
+  (nth (1- page) doc-scroll-internal-page-sizes))
+
+(defun doc-scroll-svg-draw (overlay shape x1 y1 x2 y2)
+  (let ((svg (copy-sequence (overlay-get overlay 'data))))
+    (pcase shape
+      ('rectangle (apply #'svg-rectangle svg x1 y1 (- x2 x1) (- y2 y1)
+                         (list :fill "green")))
+      ('line (apply #'svg-line svg x1 y1 x2 y2 (list :stroke-color "blue"))))
+    (overlay-put overlay 'display (svg-image svg))))
+
+(defun doc-scroll-select-region (event &optional type)
+  "Draw objects interactively via a mouse drag EVENT. "
+  (interactive "@e")
+  (pcase-let* ((start (event-start event))
+	       (start-pos (posn-object-x-y start))
+	       (`(,x1 . ,y1) start-pos)
+               (page (image-property (posn-image start) :page))
+	       (overlay (doc-scroll-page-overlay page))
+	       (start-point (doc-scroll-coords-point-scale page (posn-object-x-y start)))
+	       (end-point nil)
+	       (x2 nil)
+	       (y2 nil))
+    (track-mouse
+      (while (not (memq (car event) '(drag-mouse-1 S-drag-mouse-1)))
+        (setq event (read-event))
+        (pcase-let* ((end (event-end event))
+		     (end-pos (posn-object-x-y end)))
+	  (setq x2 (car end-pos)
+		y2 (cdr end-pos))
+	  ;; (ldbg (doc-scroll-coords-point-scale page (posn-object-x-y end)))
+	  ;; (ldbg (cons x2 y2)))))))
+	  (setq end-point (doc-scroll-coords-point-scale page (posn-object-x-y end)))
+	  (if (eq doc-scroll-drag-action 'select)
+	      (doc-scroll-redisplay-svg page (list x1 y1 x2 y2))
+	  (apply #'doc-scroll-svg-draw overlay 'line (list x1 y1 x2 y2))))))
+    ;; (doc-scroll-display-image overlay 
+    (if (eq doc-scroll-drag-action 'select)
+	(doc-scroll-redisplay-svg page (list x1 y1 x2 y2))
+      (doc-scroll-add-annot page (list (car start-point) (cdr start-point) (car end-point) (cdr end-point))
+			    (or type 'highlight) t))))
+    ;; (doc-scroll-redisplay-svg page)))
+
+	  ;; (apply #'doc-scroll-svg-draw (doc-scroll-page-overlay page) 'line
+		 ;; (list (car start) (cdr start) (car end) (cdr end))))))))
+
+;;; search
+
+(defun doc-scroll-text-line (l)
+  (let ((last (car (last l))))
+    (list (caar l) (caadr l) (caddr last) (cadddr last)
+	  (mapconcat (apply-partially #'nth 4) l " ")
+	  (nth 5 last) (nth 6 last))))
+
+(defun doc-scroll-structured-text-lines (page-text)
+  (let ((line-struct (--partition-by (seq-subseq it 5 7) page-text)))
+    (mapcar #'doc-scroll-text-line line-struct)))
+
+(provide 'doc-scroll-pymupdf)
+;;; doc-scroll-pymupdf.el ends here
+
