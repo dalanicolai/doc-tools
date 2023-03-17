@@ -425,11 +425,14 @@ Setf-able function."
     "i" 'doc-scroll-info
     "y" 'doc-scroll-kill-new
     "o" 'imenu-list-smart-toggle
-    [down-mouse-1] 'doc-scroll-select-region))
+    [down-mouse-1] 'doc-scroll-select-region)
+  
+  (when (featurep 'imenu-list)
+    (evil-define-key 'motion imenu-list-major-mode-map
+      "o" 'imenu-list-smart-toggle))
+  )
 
-(when (featurep 'imenu-list)
-  (evil-define-key 'motion imenu-list-major-mode-map
-    "o" 'imenu-list-smart-toggle))
+
 
 (define-minor-mode doc-scroll-minor-mode
   "DS"
@@ -547,7 +550,7 @@ Setf-able function."
                     ;; (point))))
                     (point)
                     (progn (insert (make-string doc-scroll-line-length (string-to-char " ")))
-                      (point)))))
+                           (point)))))
             (insert "\n")
             (overlay-put o 'page  (1+ i))
             (overlay-put o 'window win)
@@ -917,7 +920,7 @@ columns"
                                         ,page
                                         (pointer arrow)))
                                      (when (eq major-mode 'doc-scroll-epdf-mode)
-				       (pdf-links-hotspots-function page image-size))))))
+				                       (pdf-links-hotspots-function page image-size))))))
     ;; (image-flush image)
     (when (= (doc-scroll-columns) 1)
       (overlay-put (doc-scroll-overlay page) 'before-string
