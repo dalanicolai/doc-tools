@@ -1334,8 +1334,10 @@ The number of COLUMNS can be set with a numeric prefix argument."
   (let ((results (funcall (pcase major-mode
                             ('doc-backend-djvu-mode
                              #'doc-djvu-search-word)
-                            ((or 'doc-backend-pymupdf-mode
-                                 'doc-scroll-mupdf-mode)
+                            ('doc-backend-pymupdf-mode
+														 #'doc-pymupdf-epc-search)
+                            ;; ((or 'doc-backend-pymupdf-mode 'doc-scroll-mupdf-mode)
+                            ('doc-scroll-mupdf-mode
                              #'doc-poppler-search-word))
                           word)))
     (setq doc-scroll-search-state (cons 0 results))
