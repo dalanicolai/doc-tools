@@ -2,10 +2,10 @@
 
 (load-file "/home/dalanicolai/git/doc-tools/doc-scroll.el")
 (load-file "/home/dalanicolai/git/doc-tools-mupdf/doc-mupdf.el")
-(load-file "/home/dalanicolai/git/doc-tools-pymupdf/doc-pymupdf-client.el")
+(load-file "/home/dalanicolai/git/doc-tools-pymupdf-0.1/doc-tools-pymupdf.el")
 (load-file "/home/dalanicolai/git/doc-tools-poppler/doc-poppler.el")
 
-(defvar-local doc-pymupdf-server nil)
+(defvar-local doc-pymupdf-epc-server nil)
 
 (defun doc-backend-pymupdf-image-data (page _)
   (nth (1- page) doc-scroll-page-images))
@@ -23,26 +23,26 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
       ,@(svg--arguments svg args)))))
 
 (defun doc-backend-pymupdf-kill-server ()
-  (epc:stop-epc doc-pymupdf-server))
+  (epc:stop-epc doc-pymupdf-epc-server))
 
 (define-derived-mode doc-backend-pymupdf-mode special-mode "DS-PyMuPDF"
-  (let ((default-directory "/home/dalanicolai/git/doc-tools-pymupdf/"))
-    (setq doc-pymupdf-server (epc:start-epc "python" '("doc-pymupdf-server.py"))))
-  (doc-pymupdf-init)
+  (let ((default-directory "/home/dalanicolai/git/doc-tools-pymupdf-0.1"))
+    (setq doc-pymupdf-epc-server (epc:start-epc "python" '("doc-pymupdf-epc-server.py"))))
+  (doc-pymupdf-epc-init)
   (add-hook 'kill-buffer-hook #'doc-backend-pymupdf-kill-server nil t)
 
   (doc-mupdf-create-pages doc-scroll-overlay-width)
 
   (doc-scroll-minor-mode)
 
-  (setq-local doc-scroll-internal-page-sizes (doc-pymupdf-page-sizes)
+  (setq-local doc-scroll-internal-page-sizes (doc-pymupdf-epc-page-sizes)
               doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
+              ;; doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
 
               ;; doc-scroll-display-page-function #'doc-backend-djvu-display-page
               doc-scroll-image-type 'png
               ;; doc-scroll-image-data-function #'mupdf-get-image-data
-              doc-scroll-image-data-function #'doc-pymupdf-page-base64-image-data
+              doc-scroll-image-data-function #'doc-pymupdf-epc-page-base64-image-data
               ;; doc-scroll-image-data-function #'doc-backend-pymupdf-image-data
 
               ;; imenu-create-index-function #'doc-backend-mupdf--imenu-create-index
@@ -54,7 +54,7 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
                                             (doc-scroll-goto-page (if (markerp position)
                                                                  (marker-position position)
                                                                position)))
-              doc-scroll-info-function #'doc-pymupdf-info))
+              doc-scroll-info-function #'doc-pymupdf-epc-info-commands))
 
 (setq magic-mode-alist (remove '("%PDF" . pdf-view-mode) magic-mode-alist))
 (add-to-list 'auto-mode-alist '("\\.pdf\\'" . doc-backend-pymupdf-mode))

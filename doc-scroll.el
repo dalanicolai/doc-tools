@@ -594,12 +594,12 @@ Setf-able function."
   (mapcar (lambda (s)
             (let* ((win-width (float (window-pixel-width)))
                    (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-width))
-                   (v-scale-factor (when (or fit-height doc-scroll-fit-height)
+                   (y-scale-factor (when (or fit-height doc-scroll-fit-height)
                                      (/ (float (window-text-height nil t)) (cdr s))))
-                   (use-vertical-scaling (when v-scale-factor
-                                           (< (* v-scale-factor (car s)) column-width)))
+                   (use-vertical-scaling (when y-scale-factor
+                                           (< (* y-scale-factor (car s)) column-width)))
                    (scaling-factor (if use-vertical-scaling
-                                       v-scale-factor
+                                       y-scale-factor
                                      (/ (float column-width) (car s))))
                    (target-width (- (* scaling-factor (car s))
                                     (if use-vertical-scaling 0 (* 2 (or h-margin 0))))))
@@ -613,15 +613,15 @@ Setf-able function."
   (mapcar (lambda (s)
             (let* ((win-width (float (window-body-width nil t)))
                    (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-width))
-                   (v-scale-factor (when doc-scroll-fit-height
+                   (y-scale-factor (when doc-scroll-fit-height
                                      (/ (float (window-text-height nil t)) (cdr s))))
                    ;; only use the vertical scaling if otherwise page height is
                    ;; larger then window height (i.e. if column-width >
                    ;; fit-height page width)
-                   (use-vertical-scaling (when v-scale-factor
-                                           (< (* v-scale-factor (car s)) column-width)))
+                   (use-vertical-scaling (when y-scale-factor
+                                           (< (* y-scale-factor (car s)) column-width)))
                    (scaling-factor (if use-vertical-scaling
-                                       v-scale-factor
+                                       y-scale-factor
                                      (/ (float column-width) (car s))))
                    (target-width (* scaling-factor (car s))))
               (cons (floor target-width)
@@ -825,7 +825,9 @@ columns"
 
     ;; (let ((data (pymupdf-epc-page-svg-data page t)))
     (let ((data (pcase major-mode
-                  ('doc-scroll-epdf-mode (funcall doc-scroll-image-data-function page doc-scroll-overlay-width)))))
+                  ('doc-scroll-epdf-mode (funcall doc-scroll-image-data-function
+																									page
+																									doc-scroll-overlay-width)))))
       ;; (base64-decode-string
       ;; (pymupdf-epc-page-base64-image-data page
       ;; doc-scroll-overlay-width))))
