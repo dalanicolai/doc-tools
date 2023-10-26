@@ -100,9 +100,10 @@ the possibility to draw over pages (similar to [[https://github.com/dalanicolai/
 Currently, the most powerful (depending on its definition) document viewer for
 Emacs is [[https://github.com/vedang/pdf-tools][pdf-tools]]. This package improves on it in a few ways:
 
-- support multiple backends (like djvu, pymupdf)
-- continuous scrolling, and supports viewing and scrolling 2 or more pages
-  side-by-side where the view can be changed by simply using a numeric prefix
+- supports multiple backends (like djvu, pymupdf)
+- continuous scrolling
+- supports viewing and scrolling 2 or more pages side-by-side where
+  the view can be changed by simply using a numeric prefix
 - more annotation features, like line, arrow, and free text annotations
   (although currently only some type of annotations implemented, but adding
   support for more types is relatively easy).
@@ -227,3 +228,8 @@ to work with, than the data structure from pdf documents, the pymupdf backend
 can pass the structured text in 'djvu' format (Do =M-x doc-scroll-info= ->
 =doc-pymupdf-info= -> =doc-pymupdf-page-structured-text= -> insert page numbers ->
 =djvu=).
+
+** Issues
+By default the cursor should not get displayed, excpet when using
+evil-mode where it appears to not be trivial to hide the cursor (see
+[[https://github.com/emacs-evil/evil/issues/592]]).

@@ -25,7 +25,7 @@
          'g
          `(,(svg--arguments nil args))))
 
-(defcustom doc-scroll-overlay-width 1184
+(defcustom doc-scroll-overlay-max-width 1184
   "The width of the cached images."
   :type 'numberp
   :group 'doc-scroll)
@@ -35,14 +35,19 @@
   :type 'boolean
   :group 'doc-scroll)
 
-(defcustom doc-scroll-horizontal-margin 1
+(defcustom doc-scroll-columns 1
+	"Number of columns"
+	  :type 'integer
+  :group 'doc-scroll)
+
+(defcustom doc-scroll-x-margin 1
   "Vertical margin around image (pixels), i.e. page separation height.
 Because the margin is added to both sides of each page, the page
 separation height is twice this value."
   :type 'integer
   :group 'doc-scroll)
 
-(defcustom doc-scroll-vertical-margin 1
+(defcustom doc-scroll-y-margin 1
   "Vertical margin around image (pixels), i.e. page separation height.
 Because the margin is added to both sides of each page, the page
 separation height is twice this value."
@@ -111,7 +116,7 @@ Side should be a symbol left or right (default)."
   :type 'color
   :group 'doc-scroll-thumbs)
 
-(defvar-local doc-scroll-internal-page-sizes nil
+(defvar-local doc-scroll-page-sizes nil
   "List of page aspect ratios.
 Each element is a cons of the form (width . height). Usually this
 should just be a list of the document its intrinsic page sizes.")
@@ -157,7 +162,7 @@ track of the state of the document.")
                 (intern
                  (completing-read "Select mode: "
                                   '(doc-backend-djvu-mode
-                                    djvu-init-mode
+                                    djvu-init-mode ; in dvju.el
                                     doc-view-mode-maybe)))))
   (push (cons "\\.djvu\\'" mode) auto-mode-alist))
 
@@ -223,8 +228,8 @@ Folder contains thumb and page images."
   "List of overlays that make up a scroll."
   (overlay-get (nth (1- page) (doc-scroll-overlays)) 'size))
 
-(defun doc-scroll-internal-size (page)
-  (nth (1- page) doc-scroll-internal-page-sizes))
+(defun doc-scroll-page-size (page)
+  (nth (1- page) doc-scroll-page-sizes))
 
 (defun doc-scroll-overlay-selected-window-filter (overlays)
   (cl-remove-if-not
@@ -265,7 +270,7 @@ Setf-able function."
 (defun doc-scroll-fscroll-to-vscroll (fscroll &optional page)
   (* fscroll
      (cdr (doc-scroll-overlay-size (if page
-                                       (cdr (doc-scroll-overlay-size page))
+                                       (cdr (doc-scroll-desired-overlay-size))
                                      (doc-scroll-current-page))))))
 
 (defun doc-scroll-cache-folder-size (&optional _)
@@ -319,9 +324,40 @@ Setf-able function."
         (define-key map "i" 'doc-scroll-info)
         (define-key map "y" 'doc-scroll-kill-new)
         (define-key map (kbd "C-s") 'doc-scroll-search)
-        ;; (define-key map [down-mouse-1] 'doc-scroll-select-region)
-        ;; (define-key map [S-down-mouse-1] 'doc-scroll-select-region-free)
+        (define-key map [down-mouse-1] 'doc-scroll-select-region)
+        (define-key map [S-down-mouse-1] 'doc-scroll-select-region-free)
         map))
+
+(when (featurep 'evil)
+  (evil-define-key 'motion doc-scroll-mode-map
+    "j" 'doc-scroll-scroll-forward
+    "k" 'doc-scroll-scroll-backward
+    (kbd "<down>") 'doc-scroll-scroll-forward
+    (kbd "<up>") 'doc-scroll-scroll-backward
+    (kbd "<wheel-down>") 'doc-scroll-scroll-forward
+    (kbd "<wheel-up>") 'doc-scroll-scroll-backward
+    ;; (kbd "<mouse-5>") 'doc-scroll-scroll-forward
+    ;; (kbd "<mouse-4>") 'doc-scroll-scroll-backward
+    "J" 'doc-scroll-next-page
+    "K" 'doc-scroll-previous-page
+    (kbd "<next>") 'doc-scroll-next-page
+    (kbd "<prior>") 'doc-scroll-previous-page
+    (kbd "C-j") 'doc-scroll-scroll-screen-forward
+    (kbd "C-k") 'doc-scroll-scroll-screen-backward
+    (kbd "S-<next>") 'doc-scroll-scroll-screen-forward
+    (kbd "S-<prior>") 'doc-scroll-scroll-screen-backward
+    "G" 'doc-scroll-goto-page
+    "f" 'doc-scroll-fit-toggle
+    "c" 'doc-scroll-set-columns
+    "t" 'doc-scroll-thumbs
+    "T" 'doc-scroll-page-text
+    "/" 'doc-scroll-search
+    "n" 'doc-scroll-search-next
+    "p" 'doc-scroll-search-previous
+    "i" 'doc-scroll-info
+    "y" 'doc-scroll-kill-new
+    "o" 'imenu-list-smart-toggle
+    [down-mouse-1] 'doc-scroll-select-region))
 
 (defun doc-scroll-select-region-free (event)
   (interactive "@e")
@@ -334,10 +370,10 @@ Setf-able function."
          ;; (page (print (posn-area start)))
          (page (image-property (posn-image start) :page))
          (start-point (doc-scroll-coords-point-scale page (posn-object-x-y start)))
-         (text (funcall (pcase major-mode
-                          ('doc-backend-djvu-mode #'doc-backend-djvu-structured-text)
-                          ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-structured-text))
-                        page))
+         ;; (text (funcall (pcase major-mode
+         ;;                  ('doc-backend-djvu-mode #'doc-backend-djvu-structured-text)
+         ;;                  ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-structured-text))
+         ;;                page))
          first-element
          result)
     ;; NOTE we either must pass page to the 'doc-backend-djvu-get-regions' and pdf
@@ -345,7 +381,7 @@ Setf-able function."
     ;; choose the second option. DON'T SET THIS IN THE TRACK MOUSE WHILE LOOP
     (when (eq major-mode 'doc-backend-djvu-mode)
       (setq start-point (cons (car start-point)
-                              (- (cdr (doc-scroll-internal-size page)) (cdr start-point)))))
+                              (- (cdr (doc-scroll-page-size page)) (cdr start-point)))))
     (track-mouse
       (while (not (memq (car event) '(drag-mouse-1 S-drag-mouse-1)))
         (setq event (read-event))
@@ -354,21 +390,27 @@ Setf-able function."
           (when (eq major-mode 'doc-backend-djvu-mode)
             ;; NOTE see note above 'track-mouse' about correcting coords
             (setq end-point (cons (car end-point)
-                                  (- (cdr (doc-scroll-internal-size page)) (cdr end-point)))))
+                                  (- (cdr (doc-scroll-page-size page)) (cdr end-point)))))
           ;; (doc-scroll-debug "%s %s" start-point end-point)
           ;; (doc-scroll-debug "%s"
           ;; (print "hoi")
           (setq doc-scroll-active-region
                 (cons page
-                      (if free
-                          (pcase-let ((`(,x0 . ,y0) start-point)
+											(pcase-let ((`(,x0 . ,y0) start-point)
                                       (`(,x1 . ,y1) end-point))
-                            (list (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1))))
-                        (funcall (pcase major-mode
-                                   ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-word-at-point)
-                                   ('doc-backend-djvu-mode #'doc-backend-djvu-get-regions))
-                                 text start-point end-point))))
-          (doc-scroll-display-page page))))))
+                            ;; (list (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1))))
+                            (list (list x0 y0 x1 y1)))
+                      ;; (if free
+                      ;;     (pcase-let ((`(,x0 . ,y0) start-point)
+                      ;;                 (`(,x1 . ,y1) end-point))
+                      ;;       (list (list (min x0 x1) (min y0 y1) (max x0 x1) (max y0 y1))))
+                      ;;   (funcall (pcase major-mode
+                      ;;              ('doc-backend-pymupdf-mode #'doc-backend-pymupdf-word-at-point)
+                      ;;              ('doc-backend-djvu-mode #'doc-backend-djvu-get-regions))
+                      ;;            text start-point end-point))
+											))
+          (doc-scroll-display-page page))))
+		(doc-scroll-add-annot)))
 
 (defun doc-scroll-kill-new ()
   (interactive)
@@ -397,36 +439,6 @@ Setf-able function."
 ;; (let* ((start (event-start event)))
 ;;   (print start)))
 
-(when (featurep 'evil)
-  (evil-define-key 'motion doc-scroll-mode-map
-    "j" 'doc-scroll-scroll-forward
-    "k" 'doc-scroll-scroll-backward
-    (kbd "<down>") 'doc-scroll-scroll-forward
-    (kbd "<up>") 'doc-scroll-scroll-backward
-    (kbd "<wheel-down>") 'doc-scroll-scroll-forward
-    (kbd "<wheel-up>") 'doc-scroll-scroll-backward
-    ;; (kbd "<mouse-5>") 'doc-scroll-scroll-forward
-    ;; (kbd "<mouse-4>") 'doc-scroll-scroll-backward
-    "J" 'doc-scroll-next-page
-    "K" 'doc-scroll-previous-page
-    (kbd "<next>") 'doc-scroll-next-page
-    (kbd "<prior>") 'doc-scroll-previous-page
-    (kbd "C-j") 'doc-scroll-scroll-screen-forward
-    (kbd "C-k") 'doc-scroll-scroll-screen-backward
-    (kbd "S-<next>") 'doc-scroll-scroll-screen-forward
-    (kbd "S-<prior>") 'doc-scroll-scroll-screen-backward
-    "G" 'doc-scroll-goto-page
-    "f" 'doc-scroll-fit-toggle
-    "c" 'doc-scroll-set-columns
-    "t" 'doc-scroll-thumbs
-    "T" 'doc-scroll-page-text
-    "/" 'doc-scroll-search
-    "n" 'doc-scroll-search-next
-    "i" 'doc-scroll-info
-    "y" 'doc-scroll-kill-new
-    "o" 'imenu-list-smart-toggle
-    [down-mouse-1] 'doc-scroll-select-region))
-
 (when (featurep 'imenu-list)
   (evil-define-key 'motion imenu-list-major-mode-map
     "o" 'imenu-list-smart-toggle))
@@ -435,8 +447,11 @@ Setf-able function."
   "DS"
   :lighter "DS"
   :keymap doc-scroll-mode-map
-  (setq cursor-type nil)
-  (blink-cursor-mode -1)
+	;; (setq evil-force-cursor t)
+	;; (setq-local evil-motion-state-cursor nil)
+	;; (setq-local evil-default-cursor nil)
+	(toggle-truncate-lines 1)
+	(setq cursor-type nil)
 
   ;; we don't use `(image-mode-setup-winprops)' because it would additionally
   ;; add `image-mode-reapply-winprops' to the
@@ -461,9 +476,11 @@ Setf-able function."
   (when (featurep 'imenu-list)
     (setq-local imenu-list-focus-after-activation t)))
 
-(defun doc-scroll-redisplay-all ()
+(defun doc-scroll-redisplay-all (&optional force)
   (dolist (win (get-buffer-window-list))
-    (doc-scroll-redisplay nil (doc-scroll-debug "%s" win))))
+		(when  (eq (with-selected-window win major-mode)
+							 'doc-backend-pymupdf-mode)
+			(doc-scroll-redisplay force (doc-scroll-debug "%s" win)))))
 
 (defun doc-scroll-redisplay (&optional force window)
   ;; if new window then, (doc-scroll-columns) calls `image-mode-winprops' which runs
@@ -477,29 +494,27 @@ Setf-able function."
 
     (let* ((columns (or (doc-scroll-columns) 1))
            ;; (overlay-sizes (doc-scroll-desired-page-sizes
-           ;;              doc-scroll-internal-page-sizes
+           ;;              doc-scroll-page-sizes
            ;;              nil
            ;;              columns
-           ;;              doc-scroll-horizontal-margin
-           ;;              doc-scroll-vertical-margin))
-           (overlay-sizes (doc-scroll-desired-overlay-sizes
-                           doc-scroll-internal-page-sizes
-                           columns))
+           ;;              doc-scroll-x-margin
+           ;;              doc-scroll-y-margin))
+           (overlay-size (doc-scroll-desired-overlay-size))
            ;; (make-list pages (if (functionp doc-scroll-demo-page-size)
            ;;                      (funcall doc-scroll-demo-page-size)
            ;;                    doc-scroll-demo-page-size))))
            (n 0))
 
-      (dolist (overlay-size overlay-sizes)
-        (let* ((page-width (+ (car overlay-size) (* 2 doc-scroll-horizontal-margin)))
-               (overlay-heigth (+ (cdr overlay-size) (* 2 doc-scroll-vertical-margin)))
+      (dotimes (i doc-scroll-last-page)
+        (let* ((overlay-width (+ (car overlay-size) (* 2 doc-scroll-x-margin)))
+               (overlay-heigth (+ (cdr overlay-size) (* 2 doc-scroll-y-margin)))
                (o (nth n (doc-scroll-overlays))))
           ;; (when doc-scroll-center
           ;;   (overlay-put o 'before-string
-          ;;                (when (> (window-pixel-width) page-width)
+          ;;                (when (> (window-pixel-width) overlay-width)
           ;;                  (propertize " " 'display
           ;;                              `(space :align-to
-          ;;                                      (,(floor (/ (- (window-pixel-width) page-width) 2))))))))
+          ;;                                      (,(floor (/ (- (window-pixel-width) overlay-width) 2))))))))
 
           ;; NOTE we would like to store data in the overlay, but the following
           ;; functions seems not to remove that data in time
@@ -511,7 +526,7 @@ Setf-able function."
                            (propertize " " 'display
                                        `(space :align-to
                                                (,(floor (/ (- (window-pixel-width) (car overlay-size)) 2))))))))
-          (overlay-put o 'display `(space . (:width (,page-width) :height (,overlay-heigth))))
+          (overlay-put o 'display `(space . (:width (,overlay-width) :height (,overlay-heigth))))
           ;; (overlay-put o 'face `(:background ,doc-scroll-overlay-face-bg-color))
           (overlay-put o 'size overlay-size)
           (setq n (1+ n))))
@@ -519,8 +534,9 @@ Setf-able function."
       (setf (doc-scroll-columns) columns))
     ;; (sit-for 0.01) ;NOTE does not help for display issue
     (doc-scroll-goto-pos (or (doc-scroll-current-page) 1)
-                         (or (image-mode-window-get 'fscroll) 0))
-    (doc-scroll-update)))
+                         (or (window-vscroll nil t) 0))
+    (doc-scroll-update)
+		))
 ;; (run-with-timer 0.01 nil #'doc-scroll-update)))
 
 ;; NOTE this function is called via `doc-scroll-columns' in `doc-scroll-redisplay'. The
@@ -593,7 +609,7 @@ Setf-able function."
 (defun doc-scroll-desired-page-sizes (&optional aspect-ratios fit-height columns h-margin v-margin)
   (mapcar (lambda (s)
             (let* ((win-width (float (window-pixel-width)))
-                   (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-width))
+                   (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-max-width))
                    (y-scale-factor (when (or fit-height doc-scroll-fit-height)
                                      (/ (float (window-text-height nil t)) (cdr s))))
                    (use-vertical-scaling (when y-scale-factor
@@ -607,27 +623,67 @@ Setf-able function."
                     (floor (- (* (/ target-width (car s)) ;we correct the ratio t.i.c. the h-margins
                                  (if (proper-list-p s) (cadr s) (cdr s)))
                               (* 2 (or v-margin 0)))))))
-          (or aspect-ratios doc-scroll-internal-page-sizes)))
+          (or aspect-ratios doc-scroll-page-sizes)))
 
-(defun doc-scroll-desired-overlay-sizes (&optional aspect-ratios columns)
-  (mapcar (lambda (s)
-            (let* ((win-width (float (window-body-width nil t)))
-                   (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-width))
-                   (y-scale-factor (when doc-scroll-fit-height
-                                     (/ (float (window-text-height nil t)) (cdr s))))
-                   ;; only use the vertical scaling if otherwise page height is
-                   ;; larger then window height (i.e. if column-width >
-                   ;; fit-height page width)
-                   (use-vertical-scaling (when y-scale-factor
-                                           (< (* y-scale-factor (car s)) column-width)))
-                   (scaling-factor (if use-vertical-scaling
-                                       y-scale-factor
-                                     (/ (float column-width) (car s))))
-                   (target-width (* scaling-factor (car s))))
-              (cons (floor target-width)
-                    (floor (* scaling-factor
-                              (if (proper-list-p s) (cadr s) (cdr s)))))))
-          (or aspect-ratios doc-scroll-internal-page-sizes)))
+;; (defun doc-scroll-desired-overlay-sizes (&optional aspect-ratios columns)
+;;   (mapcar (lambda (s)
+;;             (let* ((win-width (float (window-body-width nil t)))
+;;                    (column-width (min (/ win-width (or columns 1)) doc-scroll-overlay-max-width))
+;;                    (y-scale-factor (when doc-scroll-fit-height
+;;                                      (/ (float (window-text-height nil t)) (cdr s))))
+;;                    ;; only use the vertical scaling if otherwise page height is
+;;                    ;; larger then window height (i.e. if column-width >
+;;                    ;; fit-height page width)
+;;                    (use-vertical-scaling (when y-scale-factor
+;;                                            (< (* y-scale-factor (car s)) column-width)))
+;;                    (scaling-factor (if use-vertical-scaling
+;;                                        y-scale-factor
+;;                                      (/ (float column-width) (car s))))
+;;                    (target-width (* scaling-factor (car s))))
+;;               (cons (floor target-width)
+;;                     (floor (* scaling-factor
+;;                               (if (proper-list-p s) (cadr s) (cdr s)))))))
+;;           (or aspect-ratios doc-scroll-page-sizes)))
+
+;; For now we keep things simple, and simply caclculate the mode of
+;; the (set of) page sizes.
+(defun doc-scroll-page-size-mode ()
+	(let (freqs
+				mode
+				(max-freq 0))
+		(dolist (s doc-scroll-page-sizes)
+			(if-let (entry (assoc s freqs))
+					(when (> (cl-incf (cdr entry)) max-freq)
+						(setq mode s))
+				(push (cons s 1) freqs)))
+		(if (= max-freq 1) nil mode)))
+
+(defun doc-scroll-page-size-average ()
+	(let ((total-x 0)
+				(total-y 0))
+		(dolist (s doc-scroll-page-sizes)
+			(cl-incf total-x (car s))
+			(cl-incf total-y (cdr s)))
+		(cons (/ total-x doc-scroll-last-page)
+					(/ total-y doc-scroll-last-page))))
+			
+(defun doc-scroll-desired-overlay-size ()
+	(let* ((win-width (float (window-pixel-width)))
+				 (win-height (float (window-pixel-height)))
+				 (aspect-ratio (if (= doc-scroll-last-page 1)
+													 (car doc-scroll-page-sizes)
+												 (or (doc-scroll-page-size-mode)
+														 (doc-scroll-page-size-average))))
+				 (width (unless doc-scroll-fit-height
+									(min (/ win-width doc-scroll-columns)
+											 doc-scroll-overlay-max-width)))
+				 (factor (if width
+										 (/ width (car aspect-ratio))
+									 (/ win-height (cdr aspect-ratio)))))
+		(if width
+				(cons (floor width) (floor (* factor (cdr aspect-ratio))))
+			(cons (floor (* factor (car aspect-ratio))) (floor win-height)))))
+
 
 (defun doc-scroll-fit-toggle ()
   (interactive)
@@ -640,6 +696,7 @@ Setf-able function."
 ;; different windows
 (defun doc-scroll-set-columns (columns)
   (interactive "p")
+	(setq-local doc-scroll-columns columns)
   (when (/= (% doc-scroll-line-length columns) 0)
     (user-error
      "The current 'scap-line-length' only supports %s number of
@@ -651,18 +708,16 @@ columns"
                 ",")))
   (let ((current-page (doc-scroll-page-at-point))
         ;; (doc-scroll-overlay-sizes (doc-scroll-desired-page-sizes
-        ;;                    doc-scroll-internal-page-sizes nil columns
-        ;;                    doc-scroll-horizontal-margin doc-scroll-vertical-margin))
-        (doc-scroll-overlay-sizes (doc-scroll-desired-overlay-sizes
-                                   doc-scroll-internal-page-sizes columns))
+        ;;                    doc-scroll-page-sizes nil columns
+        ;;                    doc-scroll-x-margin doc-scroll-y-margin))
+        (overlay-size (doc-scroll-desired-overlay-size))
         (pos 1)
         (i 0))
     (dolist (o (doc-scroll-overlays))
-      (let ((s (nth i doc-scroll-overlay-sizes)))
-        (move-overlay o pos (setq pos (+ pos (/ doc-scroll-line-length columns))))
-        (overlay-put o 'size s)
-        (overlay-put o 'before-string nil)
-        (overlay-put o 'display `(space . (:width (,(car s)) :height (,(cdr s))))))
+      (move-overlay o pos (setq pos (+ pos (/ doc-scroll-line-length columns))))
+      (overlay-put o 'size overlay-size)
+      (overlay-put o 'before-string nil)
+      (overlay-put o 'display `(space . (:width (,(car overlay-size)) :height (,(cdr overlay-size)))))
       (when (eq (% i columns) (1- columns))
         (setq pos (1+ pos)))
       (setq i (1+ i)))
@@ -683,7 +738,7 @@ columns"
     (cond ((or (= n-visible doc-scroll-last-page)
                (= n-visible 0))
            (doc-scroll-debug "number of visible overlays %s (all)" (length visible))
-           (doc-scroll-display-pages '(1 2)))
+           (doc-scroll-display-pages '(1)))
           (t
            (dolist (p (cl-set-difference displayed visible))
              (doc-scroll-undisplay-page p))
@@ -701,13 +756,18 @@ columns"
 
 (defun doc-scroll-visible-pages ()
   (interactive)
-  (sit-for 0.001) ;when overlays are not yet 'filled', and their sizes are still
-                                        ;small, then overlays-in returns too many overlays
+  ;; (sit-for 0.001) ;when overlays are not yet 'filled', and their sizes are still
+  ;;                                       ;small, then overlays-in returns too many overlays
+	(redisplay)
   (mapcar (lambda (o)
             (overlay-get o 'page))
           (delq nil (doc-scroll-overlay-selected-window-filter
                      (overlays-in (max (- (window-start) (if doc-scroll-smooth-scrolling doc-scroll-line-length 0)) 1)
-                                  (+ (window-end) (if doc-scroll-smooth-scrolling doc-scroll-line-length 0)))))))
+																	;; passing the UPDATE argument to
+																	;; window-end is important here, to
+																	;; make sure that it gets determined
+																	;; after a redisplay
+                                  (+ (window-end nil t) (if doc-scroll-smooth-scrolling doc-scroll-line-length 0)))))))
 
 (defun doc-scroll-displayed-images ()
   (interactive)
@@ -722,7 +782,7 @@ columns"
 
 (defun doc-scroll-undisplay-page (page)
   ;; (print "of hier")
-  (pcase-let* ((`(,w . ,h) (doc-scroll-overlay-size page)))
+  (pcase-let* ((`(,w . ,h) (doc-scroll-desired-overlay-size)))
     (overlay-put (doc-scroll-overlay page) 'data nil) ;; TODO improve/implement
     ;; caching algorithm
     (overlay-put (doc-scroll-overlay page)
@@ -735,7 +795,7 @@ columns"
 ;;   ;; (print "RUNNING" #'external-debugging-output)
 ;;   (pcase-let* ((size (doc-scroll-overlay-size (car pages)))
 ;;                (`(,w . ,h) size)
-;;                ;; (scale (/ (float w) (car (nth (1- (car pages)) doc-scroll-internal-page-sizes))))
+;;                ;; (scale (/ (float w) (car (nth (1- (car pages)) doc-scroll-page-sizes))))
 ;;                ;; (svg (svg-create w h))
 ;;                ;; (data nil))
 ;;                )
@@ -776,7 +836,7 @@ columns"
 ;;   (dolist (p pages)
 ;;     (let* ((size (doc-scroll-overlay-size p))
 ;;            (width (car size))
-;;                ;; (scale (/ (float w) (car (nth (1- p) doc-scroll-internal-page-sizes))))
+;;                ;; (scale (/ (float w) (car (nth (1- p) doc-scroll-page-sizes))))
 ;;                ;; (svg (svg-create w h))
 ;;                ;; (data nil))
 ;;                )
@@ -817,7 +877,7 @@ columns"
   ;; (print "RUNNING" #'external-debugging-output)
   (doc-scroll-debug "display pages %s" pages)
   (dolist (page pages)
-    ;; (let ((scale (/ (float w) (car internal-size)))
+    ;; (let ((scale (/ (float w) (car page-size)))
 
     ;; NOTE we would like to store the data in the overlay, but the
     ;; overlay-put function in the `doc-scroll-redisplay' function seems
@@ -827,10 +887,10 @@ columns"
     (let ((data (pcase major-mode
                   ('doc-scroll-epdf-mode (funcall doc-scroll-image-data-function
 																									page
-																									doc-scroll-overlay-width)))))
+																									doc-scroll-overlay-max-width)))))
       ;; (base64-decode-string
       ;; (pymupdf-epc-page-base64-image-data page
-      ;; doc-scroll-overlay-width))))
+      ;; doc-scroll-overlay-max-width))))
                                         ; (or (doc-scroll-overlay-get page 'data))
       ;;  (when (eq major-mode 'doc-backend-pymupdf-mode)
       ;;    (funcall doc-scroll-image-data-function page width))))
@@ -839,15 +899,17 @@ columns"
 
 (defun doc-scroll-display-page (page &optional data)
   (let* ((overlay-size (doc-scroll-overlay-size page))
-         (internal-size (nth (1- page) doc-scroll-internal-page-sizes))
+         (page-size (nth (1- page) doc-scroll-page-sizes))
 
-         ;; image-width should be doc-scroll-overlay-width, as we `internally
+         ;; image-width should be doc-scroll-overlay-max-width, as we `internally
          ;; scale' to the overlay-size minus margins later
-         (scaling (/ (float doc-scroll-overlay-width) (car internal-size)))
-         (image-size (cons doc-scroll-overlay-width
-                           (round (* scaling (cdr internal-size)))))
-         (svg (svg-create (car image-size)
-                          (cdr image-size)))
+         (x-scaling (/ (car overlay-size) (car page-size)))
+         (y-scaling (/ (cdr overlay-size) (cdr page-size)))
+				 (scaling (max x-scaling y-scaling))
+         (image-size (cons (round (* scaling (car page-size)))
+                           (round (* scaling (cdr page-size)))))
+         (svg (svg-create 1184
+                          1604))
          (text-elements (when (eq major-mode 'doc-backend-djvu-mode)
                           (doc-djvu-text-elements 'char page)))
          (annots (when (eq major-mode 'doc-backend-djvu-mode)
@@ -861,13 +923,13 @@ columns"
                                 ('align (message "Horizontal annot vertical align should be %s %s (not (yet) implemented)"
                                                  (nth 1 annot) (nth 2 annot)))
 
-                                ;; (message "%s %s %s %s" c internal-size 'djvu size))
-                                ('maparea (doc-scroll-annot-to-hotspot a internal-size image-size))))
+                                ;; (message "%s %s %s %s" c page-size 'djvu size))
+                                ('maparea (doc-scroll-annot-to-hotspot a page-size image-size))))
                             annots))
          (swiper-matches (doc-scroll-swiper-matches page))
          ;; (map (mapcar (lambda (c)
-         ;;                ;; (message "%s %s %s %s" c internal-size 'djvu size))
-         ;;                (doc-scroll-text-component-to-hotspot c internal-size 'djvu size))
+         ;;                ;; (message "%s %s %s %s" c page-size 'djvu size))
+         ;;                (doc-scroll-text-component-to-hotspot c page-size 'djvu size))
          ;;              text-elements))
          (image-mime-type (pcase doc-scroll-image-type
                             ('png "image/png")
@@ -891,11 +953,11 @@ columns"
                    image-mime-type
                    nil))
       (setq svg (append svg
-                        (list (doc-scroll-annots-to-svg annots internal-size image-size))
+                        (list (doc-scroll-annots-to-svg annots page-size image-size))
                         (when swiper-matches
-                          (list (doc-scroll-matches-to-svg swiper-matches internal-size image-size)))
+                          (list (doc-scroll-matches-to-svg swiper-matches page-size image-size)))
                         (when (and doc-scroll-active-region (= page (car doc-scroll-active-region)))
-                          (list (doc-scroll-regions-to-svg (cdr doc-scroll-active-region) internal-size image-size)))
+                          (list (doc-scroll-regions-to-svg (cdr doc-scroll-active-region) page-size '(1184 . 1604))))
                         (when doc-scroll-search-state
                           (let ((n (car doc-scroll-search-state))
                                 (matches (copy-sequence (cdr doc-scroll-search-state)))) ;TODO calculate 'to svg' here
@@ -903,14 +965,15 @@ columns"
                             (let ((page-matches (cl-remove-if-not (lambda (m)
                                                                     (= (car m) page))
                                                                   matches)))
-                              (list (doc-scroll-matches-to-svg (mapcar #'cdr page-matches) internal-size image-size))))))))
+                              ;; (list (doc-scroll-matches-to-svg (mapcar #'cdr page-matches) page-size image-size))))))))
+                              (list (doc-scroll-matches-to-svg (mapcar #'cdr page-matches) page-size '(1184 . 1604)))))))))
     ;; (setq image (apply (if (eq major-mode 'doc-backend-djvu-mode) ;doc-scroll-svg-embed
     (setq image (apply (if doc-scroll-svg-embed
                            (apply-partially #'svg-image svg)
                          (apply-partially #'create-image data 'png t))
                        (list :page page ;; used for mouse event page info
-                             :width (- (car overlay-size) (* 2 doc-scroll-horizontal-margin))
-                             :margin (cons doc-scroll-horizontal-margin doc-scroll-vertical-margin)
+                             :width (round (- (car overlay-size) (* 2 doc-scroll-x-margin)))
+                             :margin (cons doc-scroll-x-margin doc-scroll-y-margin)
                              :map
                              (append annot-map
                                      `(((rect . ((0 . 0) . (,(car image-size) . ,(cdr image-size))))
@@ -974,7 +1037,7 @@ columns"
       (when (window-live-p window)
         (doc-scroll-display-pages (list page))
         (goto-char (doc-scroll-page-pos page))
-        (doc-scroll-update)
+        ;; (doc-scroll-update)
         )
       (when changing-p
         (run-hooks 'doc-scroll-after-change-page-hook))
@@ -1174,6 +1237,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
                (pcase type
                  ('djvu (list x0 (- 1 y1) x1 (- 1 y0)))
                  ('svg (list x0 y0 dx dy))
+                 ;; ('svg-line (list x0 y1 x1 y0))
                  (_ coords))
                scale-factors)))
 
@@ -1184,19 +1248,21 @@ The number of COLUMNS can be set with a numeric prefix argument."
            to-size to-type)))
 
 (defun doc-scroll-coords-to-svg (page coords)
-  (let ((internal-size (doc-scroll-internal-size page))
-        (size (doc-scroll-overlay-size page)))
-    (doc-scroll-coords-convert coords internal-size
+  (let ((page-size (doc-scroll-page-size page))
+        (size (doc-scroll-desired-overlay-size)))
+    (doc-scroll-coords-convert coords page-size
                                (pcase major-mode
                                  ('doc-backend-djvu-mode 'djvu)
                                  ('doc-scroll-mupdf-mode 'pdf))
                                size 'svg)))
 
 (defun doc-scroll-coords-point-scale (page coords)
-  (pcase-let ((`(,iw . ,ih) (doc-scroll-internal-size page))
-              (`(,w . ,h) (doc-scroll-overlay-size page)))
-    (cons (* (/ (float iw) w) (car coords))
-          (* (/ (float ih) h) (cdr coords)))))
+  (pcase-let* ((`(,pw . ,ph) (doc-scroll-page-size page))
+               (`(,ow . ,oh) (doc-scroll-desired-overlay-size))
+							 (w (- ow (* 2 doc-scroll-x-margin)))
+							 (h (- oh (* 2 doc-scroll-y-margin))))
+    (cons (* (/ (float pw) w) (car coords))
+          (* (/ (float ph) h) (cdr coords)))))
 
 ;;; Hotspots
 
@@ -1300,16 +1366,27 @@ The number of COLUMNS can be set with a numeric prefix argument."
 (defun doc-scroll-regions-to-svg (regions from-size to-size)
   (let ((svg-regions (svg-group 'regions)))
     (dolist (r (doc-scroll-active-regions regions))
-      (apply #'svg-rectangle
+      ;; (apply #'svg-rectangle
+      ;;        svg-regions
+      ;;        (append (doc-scroll-coords-convert r
+      ;;                                           from-size
+      ;;                                           (pcase major-mode
+      ;;                                             ('doc-backend-djvu-mode 'djvu)
+      ;;                                             (_ 'pdf))
+      ;;                                           to-size 'svg)
+      ;;                (list :fill (or (plist-get r :fill) "gray")
+      ;;                      :opacity (or (plist-get r :opacity) 0.3)))))
+      (apply #'svg-line
              svg-regions
              (append (doc-scroll-coords-convert r
                                                 from-size
                                                 (pcase major-mode
                                                   ('doc-backend-djvu-mode 'djvu)
                                                   (_ 'pdf))
-                                                to-size 'svg)
-                     (list :fill (or (plist-get r :fill) "gray")
-                           :opacity (or (plist-get r :opacity) 0.3)))))
+                                                to-size 'pdf)
+                     (list
+											:stroke (or (plist-get r :fill) "gray")
+											:stroke-width 2))))
     svg-regions))
 
 ;;; annots
@@ -1324,6 +1401,25 @@ The number of COLUMNS can be set with a numeric prefix argument."
           a
         (alist-get 'annots
                    (alist-get page doc-scroll-contents)))))
+
+(defun doc-scroll-add-annot ()
+	(interactive)
+	(pcase-let ((`(,page . ,edges) doc-scroll-active-region))
+		(doc-pymupdf-epc-add-annot page (car edges) 'line)
+		(doc-pymupdf-epc-page-base64-image-data
+		 page
+		 1184
+		 (format (concat "/tmp/doc-tools/"
+										 (file-name-as-directory
+											(file-name-base buffer-file-name))
+										 "pages/page-%d.png")
+						 page))
+		(setq doc-scroll-active-region nil)
+		(doc-scroll-display-page page)))
+		;; (doc-scroll-redisplay-all t)))
+		;; (doc-scroll-redisplay-all t)))
+		
+
 ;;; search
 (defvar-local doc-scroll-search-state nil)
 
@@ -1335,6 +1431,7 @@ The number of COLUMNS can be set with a numeric prefix argument."
                             ('doc-backend-djvu-mode
                              #'doc-djvu-search-word)
                             ('doc-backend-pymupdf-mode
+														 ;; #'doc-poppler-search-word)
 														 #'doc-pymupdf-epc-search)
                             ;; ((or 'doc-backend-pymupdf-mode 'doc-scroll-mupdf-mode)
                             ('doc-scroll-mupdf-mode
@@ -1347,8 +1444,21 @@ The number of COLUMNS can be set with a numeric prefix argument."
 
 (defun doc-scroll-search-next ()
   (interactive)
-  (unless (nth (cl-incf (car doc-scroll-search-state)) (cdr doc-scroll-search-state))
+  (unless (nth (cl-incf (car doc-scroll-search-state))
+							 (cdr doc-scroll-search-state))
     (setf (car doc-scroll-search-state) 0))
+  (let* ((n (car doc-scroll-search-state))
+         (m (nth n (cdr doc-scroll-search-state)))
+         (page (car m))
+         ;; (coords (doc-scroll-coords-djvu-to-svg page (cl-subseq m 1 5))))
+         (coords (doc-scroll-coords-to-svg page (cl-subseq m 1 5))))
+    ;; first adjusting the scroll and then go to page displays smoothly
+    (doc-scroll-goto-pos page (max (- (nth 1 coords) (/ (window-pixel-height) 2)) 0))))
+
+(defun doc-scroll-search-previous ()
+  (interactive)
+  (when (< (cl-decf (car doc-scroll-search-state)) 0)
+    (setf (car doc-scroll-search-state) (- (length doc-scroll-search-state) 2)))
   (let* ((n (car doc-scroll-search-state))
          (m (nth n (cdr doc-scroll-search-state)))
          (page (car m))

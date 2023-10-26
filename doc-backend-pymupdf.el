@@ -31,12 +31,12 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
   (doc-pymupdf-epc-init)
   (add-hook 'kill-buffer-hook #'doc-backend-pymupdf-kill-server nil t)
 
-  (doc-mupdf-create-pages doc-scroll-overlay-width)
+  (doc-mupdf-create-pages doc-scroll-overlay-max-width)
 
   (doc-scroll-minor-mode)
 
-  (setq-local doc-scroll-internal-page-sizes (doc-pymupdf-epc-page-sizes)
-              doc-scroll-last-page (length doc-scroll-internal-page-sizes)
+  (setq-local doc-scroll-page-sizes (doc-pymupdf-epc-page-sizes)
+              doc-scroll-last-page (length doc-scroll-page-sizes)
               ;; doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
 
               ;; doc-scroll-display-page-function #'doc-backend-djvu-display-page
@@ -54,7 +54,9 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
                                             (doc-scroll-goto-page (if (markerp position)
                                                                  (marker-position position)
                                                                position)))
-              doc-scroll-info-function #'doc-pymupdf-epc-info-commands))
+              doc-scroll-info-function #'doc-pymupdf-epc-info-commands)
+
+		(doc-pymupdf-epc-init-data))
 
 (setq magic-mode-alist (remove '("%PDF" . pdf-view-mode) magic-mode-alist))
 (add-to-list 'auto-mode-alist '("\\.pdf\\'" . doc-backend-pymupdf-mode))
@@ -103,7 +105,7 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
 ;;     (nreverse sublist)))
 
 (defun doc-backend-pymupdf--imenu-create-index ()
-  (pymupdf--imenu-parse-outline (doc-pymupdf-toc)))
+  (pymupdf--imenu-parse-outline (doc-pymupdf-epc-toc)))
   ;; (setq doc-scroll-imenu-index (doc-pymupdf-toc))
   ;; (pymupdf--imenu-recur))
 
