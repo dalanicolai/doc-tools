@@ -45,9 +45,26 @@
                                     doc-pymupdf-epc-metadata
                                     doc-pymupdf-epc-page-structured-text))
 
-(defsubst list-to-cons (pair-list)
-  (cons (nth 0 pair-list)
-        (nth 1 pair-list)))
+(defsubst map-to-cons (pair-list &optional fn)
+	(if fn
+			(cons (funcall fn (nth 0 pair-list))
+						(funcall fn (nth 1 pair-list)))
+		(cons (nth 0 pair-list) (nth 1 pair-list))))
+
+(defun doc-pymupdf-epc-install (&optional virtualenv)
+	(when (y-or-n-p "Install the pymupdf-epc server in a virtual environment? :")
+		(let ((default-directory
+					 (expand-file-name
+						(read-directory-name
+						 "Enter directory where to install the new `pymupdf' virtual environment: "))))
+			(shell-command "python -m venv pymupdf")
+			(customize-save-variable 'doc-pymupdf-virutalenv-root (concat default-directory "pymupdf/"))))
+	(let* ((pip (if-let (root doc-pymupdf-virutalenv-root)
+									(concat root "bin/pip")
+								"pip")))
+		(call-process pip nil nil nil "install" "-r" "requirements.txt")))
+	
+	
 
 (defun doc-pymupdf-epc-info (function &optional arg)
   (interactive (list (completing-read "Select info type: "
@@ -180,7 +197,7 @@
 (defun doc-pymupdf-epc-page-sizes ()
   (interactive)
   (let ((sizes (epc:call-sync doc-pymupdf-epc-server 'pagesizes nil)))
-        (mapcar #'list-to-cons sizes)))
+        (mapcar #'map-to-cons sizes)))
 
 (defun doc-pymupdf-epc-page-svg-data (page text)
   (interactive "nEnter page number: ")
