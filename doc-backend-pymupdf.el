@@ -1,11 +1,17 @@
 ;; -*- lexical-binding: t; -*-
 
-(load-file "/home/dalanicolai/git/doc-tools/doc-scroll.el")
-(load-file "/home/dalanicolai/git/doc-tools-mupdf/doc-mupdf.el")
-(load-file "/home/dalanicolai/git/doc-tools-pymupdf/doc-pymupdf-client.el")
-(load-file "/home/dalanicolai/git/doc-tools-poppler/doc-poppler.el")
+(setq doc-tools-dir (file-name-directory (or load-file-name
+																						 buffer-file-name)))
 
-(defvar-local doc-pymupdf-server nil)
+(dolist (f '("doc-mupdf.el" "doc-tools-pymupdf.el" "doc-scroll.el"))
+	(load-file (concat doc-tools-dir f)))
+
+
+(defcustom doc-pymupdf-virutalenv-root nil
+	"Pymupdf virtualenv"
+	:group 'doc-tools)
+
+(defvar-local doc-pymupdf-epc-server nil)
 
 (defun doc-backend-pymupdf-image-data (page _)
   (nth (1- page) doc-scroll-page-images))
@@ -23,26 +29,42 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
       ,@(svg--arguments svg args)))))
 
 (defun doc-backend-pymupdf-kill-server ()
-  (epc:stop-epc doc-pymupdf-server))
+  (epc:stop-epc doc-pymupdf-epc-server))
 
-(define-derived-mode doc-backend-pymupdf-mode special-mode "DS-PyMuPDF"
-  (let ((default-directory "/home/dalanicolai/git/doc-tools-pymupdf/"))
-    (setq doc-pymupdf-server (epc:start-epc "python" '("doc-pymupdf-server.py"))))
-  (doc-pymupdf-init)
+;;;###autoload
+(define-derived-mode doc-backend-pymupdf-mode special-mode "DS-PyMuPDF/"
+  (let ((default-directory doc-tools-dir)
+				(python-interpreter (if-let (venv doc-pymupdf-virutalenv-root)
+																										(expand-file-name "bin/python" venv)
+															"python")))
+		(unless (= (call-process python-interpreter nil nil nil "-c" "'import fitz'") 0)
+			(doc-pymupdf-epc-install))
+		(setq doc-pymupdf-epc-server (epc:start-epc python-interpreter '("doc-pymupdf-epc-server.py"))))
+  (doc-pymupdf-epc-init)
   (add-hook 'kill-buffer-hook #'doc-backend-pymupdf-kill-server nil t)
 
-  (doc-mupdf-create-pages doc-scroll-overlay-width)
+  (doc-mupdf-create-pages image-roll-overlay-max-width)
 
-  (doc-scroll-minor-mode)
+  (image-roll-mode)
 
-  (setq-local doc-scroll-internal-page-sizes (doc-pymupdf-page-sizes)
-              doc-scroll-last-page (length doc-scroll-internal-page-sizes)
-              doc-scroll-structured-contents (doc-poppler-structured-contents nil nil t)
+  (setq-local doc-scroll-page-sizes (doc-pymupdf-epc-page-sizes)
+							doc-scroll-image-file-sizes (mapcar
+																					 (lambda (s)
+																						 (let ((scale (/ (float image-roll-overlay-max-width) (car s))))
+																							 (cons image-roll-overlay-max-width (round (* scale (cdr s))))))
+																					 doc-scroll-page-sizes)
+																					 
+																											
+              doc-scroll-length (length doc-scroll-page-sizes)
 
-              ;; doc-scroll-display-page-function #'doc-backend-djvu-display-page
-              doc-scroll-image-type 'png
+							image-roll-images
+							(cddr (directory-files
+										 "/tmp/doc-tools/Peter Seibel - Practical Common Lisp-Apress (2005)/pages"
+										 t))
+
+              ;; doc-scroll-image-type 'png
               ;; doc-scroll-image-data-function #'mupdf-get-image-data
-              doc-scroll-image-data-function #'doc-pymupdf-page-base64-image-data
+              ;; doc-scroll-image-data-function #'doc-pymupdf-epc-page-base64-image-data
               ;; doc-scroll-image-data-function #'doc-backend-pymupdf-image-data
 
               ;; imenu-create-index-function #'doc-backend-mupdf--imenu-create-index
@@ -54,58 +76,30 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
                                             (doc-scroll-goto-page (if (markerp position)
                                                                  (marker-position position)
                                                                position)))
-              doc-scroll-info-function #'doc-pymupdf-info))
+              ;; doc-scroll-info-function #'doc-pymupdf-epc-info-commands
+							)
+
+		(doc-pymupdf-epc-init-data))
 
 (setq magic-mode-alist (remove '("%PDF" . pdf-view-mode) magic-mode-alist))
 (add-to-list 'auto-mode-alist '("\\.pdf\\'" . doc-backend-pymupdf-mode))
 
 (defun doc-backend-pymupdf-structured-text (page)
-  (nth (1- page) doc-scroll-structured-text))
+	(overlay-get (image-roll-overlay page) 'text))
 
-(defun doc-backend-pymupdf-parse-contents (e)
-  ;; (print e))
-  (let ((coords (nth 1 e)))
-    (pcase (car e)
-      ('page `(0 0
-                 ,(string-to-number (alist-get 'width coords))
-                 ,(string-to-number (alist-get 'height coords))
-                 ,@(mapcar #'pymupdf-parse-contents (nthcdr 2 e))))
-      (_
-       `(,(car e)
-         ,@(mapcar (lambda (c)
-                     (string-to-number (alist-get c coords)))
-                   '(xmin ymin xmax ymax))
-         ,(car (last e)))))))
+(defun doc-backend-pymupdf-word-index-at-point (point text)
+	(seq-position text point (lambda (x y) (and (< (cdr y) (nth 3 x))
+																							(< (car y) (nth 2 x))))))
 
-;;; imenu
+(defun doc-backend-pymupdf-region-to-selection (coords text)
+	(pcase-let* ((`(,x0 ,y0 ,x1 ,y1) coords)
+							 (beg (doc-backend-pymupdf-word-index-at-point (cons x0 y0) text))
+							 (end (doc-backend-pymupdf-word-index-at-point (cons x1 y1) text)))
+		(seq-subseq text beg (1+ end))))
 
-;; (defun pymupdf--imenu-recur ()
-;;   (let ((level (caar doc-scroll-imenu-index))
-;;         sublist)
-;;     (while (and (cdr doc-scroll-imenu-index)
-;;                 (>= (car (nth 1 doc-scroll-imenu-index)) level))
-;;       (let* ((e (car doc-scroll-imenu-index))
-;;              (title (nth 1 e))
-;;              (page (nth 2 e)))
-;;         (cond ((= (car (nth 1 doc-scroll-imenu-index)) level)
-;;                (push (cons title page) sublist)
-;;                (pop doc-scroll-imenu-index))
-;;               ((> (car (nth 1 doc-scroll-imenu-index)) level)
-;;                (pop doc-scroll-imenu-index)
-;;                (push (append (list title) (pymupdf--imenu-recur))
-;;                      sublist)))))
-;;     (when (= (car (car doc-scroll-imenu-index)) level)
-;;       (let ((e (car doc-scroll-imenu-index)))
-;;         (push (cons (nth 1 e) (nth 2 e)) sublist)))
-;;     (when (and (cdr doc-scroll-imenu-index)
-;;                (<= (- level (car (nth 1 doc-scroll-imenu-index))) 1))
-;;       (pop doc-scroll-imenu-index))
-;;     (nreverse sublist)))
-
+;;; Imenu
 (defun doc-backend-pymupdf--imenu-create-index ()
-  (pymupdf--imenu-parse-outline (doc-pymupdf-toc)))
-  ;; (setq doc-scroll-imenu-index (doc-pymupdf-toc))
-  ;; (pymupdf--imenu-recur))
+  (pymupdf--imenu-parse-outline (doc-pymupdf-epc-toc)))
 
 (defun tree-map (tree)
   (mapcar (lambda (e)
@@ -146,25 +140,3 @@ otherwise.  IMAGE-TYPE should be a MIME image type, like
       (cl-decf current-level))
 
     (tree-map (reverse (alist-get 0 levels)))))
-
-;;; annots
-
-(defun doc-backend-pymupdf-word-at-point (page-contents start-point end-point)
-  (let ((text (doc-pymupdf-page-structured-text 1 'blocks))
-        (i 0))
-    (while (> (cdr start-point) (nth 3 (nth i text)))
-      (setq i (1+ i)))
-    (while (> (car start-point) (nth 2 (nth i text)))
-      (setq i (1+ i)))
-    (print (nth i text)))) ;NOTE posn-area only does not work for
-
-;; NOTE for use with doc-toc
-(defun doc-backend-pymupdf-extract-blocks (pred &optional page)
-  (mapcan (lambda (p)
-            (let* ((contents (doc-pymupdf-page-structured-text p 'blocks))
-                   (lines (seq-filter pred contents)))
-              (mapcar (lambda (l) (cons (nth 4 l) p)) (cdr lines))))
-         (or page (number-sequence 1 doc-scroll-last-page))))
-
-;; (pp (pymupdf--imenu-parse-outline doc-scroll-imenu-index))
-
