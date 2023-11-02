@@ -77,8 +77,9 @@
 
 (defun doc-mupdf-create-pages (width &optional file force)
   (setq file (or file buffer-file-name))
-  (let ((outdir (concat "/tmp/doc-tools/" (file-name-as-directory (file-name-base file)) "pages/")))
-    (when (or (not (file-exists-p outdir)) force)
+  (let* ((outdir (concat "/tmp/doc-tools/" (file-name-as-directory (file-name-base file)) "pages/"))
+				 (files (when (file-exists-p outdir) (directory-files outdir nil "\\.png$"))))
+    (when (or (/= (length files) (length doc-scroll-page-sizes))  force)
       (unless (file-exists-p outdir)
         (make-directory outdir t))
       (let ((proc (start-process "mutool" "mutool create page files" "mutool"
