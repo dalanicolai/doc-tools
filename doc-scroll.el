@@ -245,8 +245,13 @@
 		"a" 'test))
 
 (define-minor-mode doc-scroll-select-mode 
-	"DS"
-  :lighter "DS/"
+	"Mode active during text selection."
+  :lighter "Select "
+  :keymap doc-scroll-select-mode-map)
+
+(define-minor-mode doc-scroll-free-select-mode 
+	"Mode active during free selection."
+  :lighter "Free "
   :keymap doc-scroll-select-mode-map)
 
 (defun doc-scroll-select-region-free (event)
@@ -256,7 +261,8 @@
 (defun doc-scroll-select-region (event &optional free)
   "Draw objects interactively via a mouse drag EVENT. "
   (interactive "@e")
-	(doc-scroll-select-mode)
+	(doc-scroll-free-select-mode (if free 1 0))
+	(doc-scroll-select-mode (if free 0 1))
   (let* ((start (event-start event))
          ;; (page (print (posn-area start)))
          (page (image-property (posn-image start) :image))
@@ -303,7 +309,12 @@
 
 (defun doc-scroll-select-abort ()
 	(interactive)
-	(doc-scroll-select-mode 0))
+	(doc-scroll-select-mode 0)
+	(doc-scroll-free-select-mode 0)
+	(let ((page (car doc-scroll-active-region)))
+		(setq doc-scroll-active-region nil)
+		(doc-scroll-display-page page)))
+
 
 (defun doc-scroll-active-region-text ()
   (mapconcat (lambda (e)
@@ -315,18 +326,16 @@
   (mapcar (lambda (r) (if (nthcdr 4 r) (butlast r) r)) regions))
 
 (defun doc-scroll-svg-active-region (svg page)
-	(let* ((coords (cdr doc-scroll-active-region))
+	(let* ((free doc-scroll-free-select-mode)
+				 (line (eq doc-scroll-annot-type 'line))
+				 (coords (cdr doc-scroll-active-region))
 				 (svg-coords (doc-scroll-coords-denormalize coords
 																										(doc-scroll-image-file-size page)
-																										(unless (eq doc-scroll-annot-type 'line)
-																											'svg))))
-		(apply (if (eq doc-scroll-annot-type 'line) #'svg-line #'svg-rectangle)
-					 svg (append svg-coords
-											 (if (eq doc-scroll-annot-type 'line)
-													 (list :stroke "blue"
-																 :strok-width 3)
-												 (list :fill "gray"
-															 :opacity 0.5)))))
+																										(unless (and free line) 'svg))))
+		(apply (if (and free line) #'svg-line #'svg-rectangle)
+					 svg (append svg-coords (if (and free line)
+																						 (list :stroke "blue" :stroke-width 3)
+																					 (list :fill "gray" :opacity 0.5)))))
 	svg)
 ;; (defun doc-scroll-svg-active-region (svg page)
 ;; 	(let* ((coords (cdr doc-scroll-active-region)))
