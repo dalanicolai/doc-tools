@@ -37,19 +37,6 @@ you'd like to practice some elisp, while contributing to a package then check
 out the [[TODO]] list below. Of course you are always welcome to contact me (e.g. on
 github or per email).
 
-If this package helps you with your paid (or optionally your unpaid) work (or if
-you just like to support/popularize Emacs by supporting to make it more
-attractive and more useful for more people), then please help me with my work
-also. Creating this package takes a huge amount of time (for coding, but
-especially for investigating). However, I am in a situation that I have very
-little spare time, and even less money. Despite the deep wisdom in the saying:
-'[[https://www.quora.com/What-is-an-explanation-of-the-sentence-Let-not-the-fruits-of-action-be-your-motive-nor-let-your-attachment-be-to-inaction][Let not the fruits of action be your motive]]', we do need some fruit to stay
-alive. Therefore, I would be very happy either with your contributions to the
-code, or otherwise, if you can afford it, with your financial support. Without
-donations, I am simply unable to work on the package, while small donations let
-me add nice features (so you could see your donation as a donation to Emacs and
-the community).
-
 * Why this package?
 Although having columns might not be a huge improvement, I find Emacs and its
 users valuable enough to add this feature to its document reader. Additionally,
