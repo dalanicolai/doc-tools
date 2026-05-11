@@ -25,7 +25,7 @@ work perfectly fine on other (non-)free platforms also.
 ** Important
 Currently, this package caches all page images somewhere in the =/tmp= directory.
 Therefore (although it is a nice default anyway), the images are set to a
-limited size (memory use increases exponentially with image size). Most/all
+limited size (memory use increases quadratically with image size). Most/all
 computers probably have enough memory space (about 50-300 MB per book), however
 you can check the memory size of the books pages folder using
 =doc-scroll-cache-folder-size= (the recommended way is to call it via
